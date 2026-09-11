@@ -16,6 +16,7 @@ interface TopologyProps {
   removedEdges?: NetworkEdge[] | null;
   simulationActive?: boolean;
   targetRanking?: TargetRankingEntry[] | null;
+  isAnalysisRunning?: boolean;
 }
 
 function getRoleIcon(role: string) {
@@ -44,6 +45,7 @@ export function Topology({
   removedEdges,
   simulationActive,
   targetRanking,
+  isAnalysisRunning,
 }: TopologyProps) {
   const [showAll, setShowAll] = useState(false);
   const [criticalityFilter, setCriticalityFilter] = useState<string>('All');
@@ -96,16 +98,45 @@ export function Topology({
   }, [filteredByControls, rankingMap]);
 
   const visibleCountDefault = 20;
-  const visibleNodes = useMemo(() => {
+  const visibleNodesBase = useMemo(() => {
     if (showAll) return sortedNodes;
     if (sortedNodes.length <= 25) return sortedNodes;
     return sortedNodes.slice(0, visibleCountDefault);
   }, [sortedNodes, showAll]);
 
+  // Ensure predicted path endpoints are always visible (data-derived, not invented) while keeping 20 default
+  const visibleNodes = useMemo(() => {
+    if (!predictedPath || !predictedPath.source || !predictedPath.target) return visibleNodesBase;
+    const src = predictedPath.source as string;
+    const tgt = predictedPath.target as string;
+    const ids = new Set(visibleNodesBase.map((n) => n.id));
+    const extra: NetworkNode[] = [];
+    if (!ids.has(src)) {
+      const found = nodes.find((n) => n.id === src);
+      if (found) extra.push(found);
+    }
+    if (!ids.has(tgt)) {
+      const found = nodes.find((n) => n.id === tgt);
+      if (found) extra.push(found);
+    }
+    if (extra.length === 0) return visibleNodesBase;
+    const combined = [...visibleNodesBase, ...extra];
+    // Keep default view at 20 hosts - replace lowest ranked to keep 20, not exceed
+    if (visibleNodesBase.length === visibleCountDefault) {
+      const needed = combined.length - visibleCountDefault;
+      return [...visibleNodesBase.slice(0, visibleNodesBase.length - needed), ...extra];
+    }
+    if (combined.length <= 25) return combined;
+    const needed = combined.length - 25;
+    return [...visibleNodesBase.slice(0, visibleNodesBase.length - needed), ...extra];
+  }, [visibleNodesBase, predictedPath, nodes]);
+
   const backgroundNodes = useMemo(() => {
     if (showAll || sortedNodes.length <= 25) return [];
-    return sortedNodes.slice(visibleCountDefault);
-  }, [sortedNodes, showAll]);
+    // Background includes those not in visibleNodes (including predicted extras)
+    const visibleSet = new Set(visibleNodes.map((n) => n.id));
+    return sortedNodes.filter((n) => !visibleSet.has(n.id));
+  }, [sortedNodes, showAll, visibleNodes]);
 
   const visibleIds = useMemo(() => new Set(visibleNodes.map((n) => n.id)), [visibleNodes]);
 
@@ -117,6 +148,8 @@ export function Topology({
   const positions = useMemo(() => getAllPositions(visibleNodes), [visibleNodes]);
 
   const clusterCount = backgroundNodes.length;
+
+  const topTargetId = useMemo(() => targetRanking?.[0]?.host ?? null, [targetRanking]);
 
   const selectedRankingEntry = useMemo(() => {
     if (!selectedHost) return null;
@@ -138,7 +171,9 @@ export function Topology({
     const baseNodes = visibleNodes.map((n) => {
       const pos = positions.get(n.id) || { x: 100, y: 100 };
       const isSuspicious = n.observed_state === 'suspicious' || (warning && n.risk > 0.45);
-      const isGroundTruth = groundTruthRevealed && isSuspicious;
+      const isGroundTruth = groundTruthRevealed;
+      const isTopTarget = topTargetId !== null && n.id === topTargetId && warning && !groundTruthRevealed;
+      const isAnalysisPulse = isAnalysisRunning && !warning && !groundTruthRevealed && n.risk > 0.15;
       const Icon = getRoleIcon(n.role);
       let label = 'Observed - healthy';
       if (isGroundTruth) {
@@ -150,6 +185,20 @@ export function Topology({
         n.criticality === 'high' ? 'bg-coral-500' : n.criticality === 'medium' ? 'bg-orange-500' : 'bg-cyan-500';
       const safeDisplayAlias = sanitizeAlias((n as any).alias || n.id);
 
+      // Derive motion classes - data-derived only, never invent nodes/edges
+      const motionClasses: string[] = [];
+      let motionLabel = '';
+      if (isTopTarget) {
+        motionClasses.push('topology-motion-warning');
+        motionLabel = ' - warning target pulse';
+      } else if (isGroundTruth) {
+        motionClasses.push('topology-motion-confirmation');
+        motionLabel = ' - confirmation pulse';
+      } else if (isAnalysisPulse) {
+        motionClasses.push('topology-motion-analysis');
+        motionLabel = ' - analysis pulse';
+      }
+
       return {
         id: n.id,
         position: pos,
@@ -159,7 +208,8 @@ export function Topology({
               role="button"
               tabIndex={0}
               data-testid={`host-node-${n.id}`}
-              aria-label={`Host ${safeDisplayAlias} - ${n.role} - risk ${n.risk.toFixed(2)} - ${n.criticality} - ${label}`}
+              data-motion={isTopTarget ? 'warning' : isGroundTruth ? 'confirmation' : isAnalysisPulse ? 'analysis' : 'none'}
+              aria-label={`Host ${safeDisplayAlias} - ${n.role} - risk ${n.risk.toFixed(2)} - ${n.criticality} - ${label}${motionLabel}`}
               onKeyDown={(e: React.KeyboardEvent) => {
                 if (e.key === 'Enter' || e.key === ' ' || e.code === 'Space' || e.key === 'Spacebar') {
                   e.preventDefault();
@@ -173,7 +223,7 @@ export function Topology({
                 const found = nodes.find((x) => x.id === n.id) || visibleNodes.find((x) => x.id === n.id);
                 if (found) setSelectedHost(found);
               }}
-              className="flex flex-col items-center gap-0 px-0.5 py-0.5 leading-tight text-[13px] focus:outline-none focus:ring-2 focus:ring-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400 rounded cursor-pointer"
+              className={`flex flex-col items-center gap-0 px-0.5 py-0.5 leading-tight text-[13px] focus:outline-none focus:ring-2 focus:ring-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400 rounded cursor-pointer ${motionClasses.join(' ')}`}
             >
               <Icon className="w-3 h-3" aria-hidden="true" />
               <span className="text-[13px] font-mono font-bold truncate max-w-[96px]">{safeDisplayAlias}</span>
@@ -246,7 +296,7 @@ export function Topology({
 
     return baseNodes;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleNodes, positions, warning, groundTruthRevealed, clusterCount]);
+  }, [visibleNodes, positions, warning, groundTruthRevealed, clusterCount, topTargetId, isAnalysisRunning]);
 
   const rfEdges = useMemo(() => {
     const removedSet = new Set((removedEdges || []).map((re) => `${re.source}-${re.target}`));
@@ -267,9 +317,13 @@ export function Topology({
           },
           labelStyle: { fontSize: 13, fill: '#fb923c', background: '#111827' },
           animated: false,
+          className: 'topology-edge-removed',
           data: { status: 'removed', style: 'muted' },
         };
       }
+      // Observed activity motion - data-derived: high activity flows get subtle dash motion, visible even when paused
+      const hasObservedMotion = e.activity > 4 && !isGroundTruthEdge;
+      const isObservedAnimated = hasObservedMotion;
       return {
         id: `${e.source}-${e.target}`,
         source: e.source,
@@ -278,10 +332,12 @@ export function Topology({
         style: {
           stroke: isGroundTruthEdge ? '#f87171' : '#22d3ee',
           strokeWidth: Math.min(3, 1 + e.activity * 0.3),
+          ...(isObservedAnimated ? { strokeDasharray: '8 4' } : {}),
         },
         labelStyle: { fontSize: 13, fill: '#9ca3af', background: '#111827' },
-        animated: false,
-        data: { status: isGroundTruthEdge ? 'ground_truth' : 'observed' },
+        animated: isObservedAnimated,
+        className: hasObservedMotion ? 'topology-motion-observed' : isGroundTruthEdge ? 'topology-motion-confirmation' : 'topology-edge-observed',
+        data: { status: isGroundTruthEdge ? 'ground_truth' : 'observed', motion: hasObservedMotion ? 'observed' : 'none' },
       };
     });
 
@@ -332,7 +388,8 @@ export function Topology({
             } as any,
             labelStyle: { fontSize: 13, fill: '#a855f7', background: '#111827' },
             animated: true,
-            data: { status: 'predicted' },
+            className: 'topology-motion-predicted',
+            data: { status: 'predicted', motion: 'predicted' },
           });
         } else {
           base.push({
@@ -347,7 +404,8 @@ export function Topology({
             } as any,
             labelStyle: { fontSize: 13, fill: '#a855f7', backgroundColor: '#111827' } as unknown as Record<string, unknown>,
             animated: true,
-            data: { status: 'predicted' },
+            className: 'topology-motion-predicted',
+            data: { status: 'predicted', motion: 'predicted' },
           } as unknown as typeof base[number]);
         }
       } else if (showAll) {
@@ -359,7 +417,14 @@ export function Topology({
   }, [filteredEdges, predictedPath, groundTruthRevealed, removedEdges, simulationActive, visibleIds, showAll]);
 
   return (
-    <div className="bg-navy-800 border border-navy-700 rounded-lg flex flex-col overflow-hidden" data-testid="topology" style={{ height: '660px' }}>
+    <div
+      className={`bg-navy-800 border border-navy-700 rounded-lg flex flex-col overflow-hidden ${isAnalysisRunning ? 'topology-motion-analysis' : ''}`}
+      data-testid="topology"
+      data-analysis-running={isAnalysisRunning ? 'true' : 'false'}
+      data-warning-active={warning ? 'true' : 'false'}
+      data-ground-truth={groundTruthRevealed ? 'true' : 'false'}
+      style={{ height: '660px' }}
+    >
       <div className="px-4 py-2 border-b border-navy-700 flex items-center justify-between flex-wrap gap-2 bg-cyber-900/50 sm:bg-navy-800">
         <h3 className="text-[13px] font-bold tracking-wide uppercase text-white flex items-center gap-2">
           <span className={`w-2 h-2 rounded-full ${simulationActive ? 'bg-orange-400' : 'bg-cyan-400'}`} aria-hidden="true"></span>
@@ -499,6 +564,17 @@ export function Topology({
           .react-flow__controls-button:focus-visible { outline: none; box-shadow: 0 0 0 2px #22d3ee; }
           .react-flow__node:focus { outline: none; box-shadow: 0 0 0 2px #22d3ee; }
           .react-flow__node:focus-visible { outline: none; box-shadow: 0 0 0 2px #22d3ee; }
+          @keyframes topologyPulse { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.03); opacity: 0.88; } }
+          @keyframes topologyDash { to { stroke-dashoffset: -12; } }
+          .topology-motion-warning { animation: topologyPulse 1.6s ease-in-out infinite; }
+          .topology-motion-confirmation { animation: topologyPulse 1.4s ease-in-out infinite; }
+          .topology-motion-observed.animated path { animation: topologyDash 1s linear infinite; }
+          .topology-motion-predicted.animated path { animation: topologyDash 0.9s linear infinite; }
+          .topology-motion-analysis { box-shadow: 0 0 0 1px rgba(34,211,238,0.12) inset; }
+          @media (prefers-reduced-motion: reduce) {
+            .topology-motion-warning, .topology-motion-confirmation, .topology-motion-observed, .topology-motion-predicted, .topology-motion-analysis, .animate-pulse { animation: none !important; }
+            .react-flow__edge.animated path { animation: none !important; }
+          }
         `}</style>
         <ReactFlow
           nodes={rfNodes}

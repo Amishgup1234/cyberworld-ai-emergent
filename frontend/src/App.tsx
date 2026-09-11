@@ -7,10 +7,16 @@ import { RiskChart } from './components/RiskChart';
 import { StagePanel } from './components/StagePanel';
 import { TargetPanel } from './components/TargetPanel';
 import { WorkspaceTabs } from './components/WorkspaceTabs';
+import { AnalysisProgress } from './components/AnalysisProgress';
+import { AnalysisStatus, derivePhase } from './components/AnalysisStatus';
+import { ThreatExplanation } from './components/ThreatExplanation';
+import { TechnicalProofDrawer } from './components/TechnicalProofDrawer';
+import { PreventiveActionPanel } from './components/PreventiveActionPanel';
 import { useHealthCheck } from './hooks/useHealthCheck';
 import { useScenarioData } from './hooks/useScenarioData';
-import { useReplayController } from './hooks/useReplayController';
+import { useAnalysisSession } from './hooks/useAnalysisSession';
 import type { ScenarioFrame, SimulationResult } from './api/generated';
+import type { PlaybackSpeed } from './hooks/useReplayController';
 
 function App() {
   const { health, mode, checked } = useHealthCheck();
@@ -19,9 +25,13 @@ function App() {
   const frames: ScenarioFrame[] = useMemo(() => scenario?.frames ?? [], [scenario]);
   const frameCount = frames.length || 30;
 
-  const { currentFrame, isPlaying, speed, setSpeed, play, pause, restart, goToFrame } =
-    useReplayController(frameCount);
+  const [speed, setSpeed] = useState<PlaybackSpeed>(1);
+  const stepMs = useMemo(() => (speed === 0.5 ? 1600 : speed === 2 ? 400 : 800), [speed]);
 
+  const shouldAutoStart = frames.length > 2;
+  const analysis = useAnalysisSession(frames as unknown as ScenarioFrame[], { autoStart: shouldAutoStart, stepMs });
+
+  const currentFrame = analysis.currentFrame;
   const current: ScenarioFrame | undefined = frames[currentFrame];
 
   // Simulation state - for Phase 08 what-if isolation (reused via WorkspaceTabs)
@@ -30,20 +40,12 @@ function App() {
   const [simulationLoading, setSimulationLoading] = useState(false);
   const [simulationError, setSimulationError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (simulationResult && simulationResult.frame_id !== currentFrame) {
-      // Keep but show mismatch warning? We'll clear to avoid confusion and let user re-simulate for new frame
-      // Commented to preserve before/after until cleared, but we note frame mismatch in panel
-    }
-  }, [currentFrame, simulationResult]);
-
-  // Derive display values
+  // Keep derived values for header
   const dataMode = (scenario?.metadata?.data_mode as string) || (health?.data_mode as string) || 'synthetic';
   const scenarioName = scenario?.name;
   const disclosure = (scenario?.metadata?.disclosure as string) || '';
   const claimLimitations =
     (scenario?.metadata?.claim_limitations as string) ||
-    (scenario?.engine_metadata?.claim_limitations as string) ||
     (scenario?.engine_metadata?.claim_limitations as string) ||
     (health?.claim_limitations as string) ||
     'Binary benign-versus-malicious risk only (learned); stage estimate is rule-derived evidence score; target ranking is NetworkX graph-ranked; isolation is simulated estimate - not causal proof';
@@ -51,6 +53,42 @@ function App() {
   const scenarioId = (scenario?.scenario_id as string) || (scenario?.id as string) || 'cyberworld-replay-v1';
   const modelFamily = (scenario?.engine_metadata?.model_family as string) || (health?.model_family as string) || undefined;
   const modelVersion = (scenario?.engine_metadata?.model_version as string) || (health?.version as string) || undefined;
+
+  // Keyboard accessibility for analysis: Space Pause/Continue, R Restart, Arrows next/prev
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      const interactiveSelector = 'button, select, input, textarea, [role="tab"], [role="tablist"], [contenteditable="true"]';
+      if (target instanceof HTMLElement) {
+        try {
+          if (target.closest(interactiveSelector)) return;
+        } catch (_e) {
+          void _e;
+        }
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+        try {
+          if (target.closest('button') || target.closest('select') || target.closest('[role="tab"]')) return;
+        } catch (_e2) {
+          void _e2;
+        }
+      }
+      if (e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar') {
+        e.preventDefault();
+        if (analysis.isRunning) analysis.pause();
+        else analysis.continueAnalysis();
+      } else if (e.key === 'r' || e.key === 'R') {
+        analysis.restart();
+      } else if (e.key === 'ArrowRight') {
+        analysis.nextFrame();
+      } else if (e.key === 'ArrowLeft') {
+        analysis.prevFrame();
+      }
+    };
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [analysis]);
 
   // Validate scenario frame structure for invalid-data state
   function validateScenario(s: typeof scenario): { valid: boolean; reason: string } {
@@ -134,9 +172,34 @@ function App() {
   const forecast = current.forecast;
   const groundTruth = current.ground_truth;
 
+  const phase = derivePhase(
+    currentFrame,
+    {
+      baselineFrame: analysis.milestones.baselineFrame,
+      emergingRiskFrame: analysis.milestones.emergingRiskFrame,
+      warningFrame: analysis.milestones.warningFrame,
+      confirmationFrame: analysis.milestones.confirmationFrame,
+    },
+    signals.warning,
+    groundTruth.revealed,
+    !!simulationResult
+  );
+
+  const handleMilestoneClick = (id: 'baseline' | 'emerging-risk' | 'early-warning' | 'confirmation') => {
+    analysis.goToMilestone(id);
+  };
+
+  const handleFrameChange = (f: number) => {
+    analysis.goToFrame(f);
+  };
+
+  const handleSpeedChange = (s: PlaybackSpeed) => {
+    setSpeed(s);
+  };
+
   return (
     <div className="h-screen w-screen overflow-hidden flex flex-col bg-navy-900 text-gray-200 border-t-2 border-cyan-500" data-testid="app-shell">
-      {/* Command Bar - full-screen top bar h-12 */}
+      {/* Command Bar - keep for branding and mode, but sync with analysis frame for backward compat */}
       <CommandBar
         mode={mode}
         health={health}
@@ -147,13 +210,13 @@ function App() {
         currentFrame={currentFrame}
         totalFrames={frameCount}
         timestamp={current.timestamp}
-        isPlaying={isPlaying}
+        isPlaying={analysis.isRunning}
         speed={speed}
-        onPlay={play}
-        onPause={pause}
-        onRestart={restart}
-        onSpeedChange={setSpeed}
-        onFrameChange={goToFrame}
+        onPlay={analysis.continueAnalysis}
+        onPause={analysis.pause}
+        onRestart={analysis.restart}
+        onSpeedChange={handleSpeedChange}
+        onFrameChange={handleFrameChange}
       />
 
       {/* Warning Banner - prominent orange/coral when signals.warning true, dismissible, ARIA live polite */}
@@ -187,19 +250,83 @@ function App() {
         );
       })()}
 
-      {/* Disclosure */}
+      {/* Disclosure - compact truthful data-mode disclosure */}
       {disclosure && (
-        <div className="w-full px-4 py-1 text-[13px] text-gray-500 bg-navy-800 border-b border-navy-700 shrink-0">
-          <span className="font-medium text-gray-400">Disclosure:</span> {disclosure.slice(0, 220)}...
+        <div className="w-full px-4 py-1 text-[13px] text-gray-500 bg-navy-800 border-b border-navy-700 shrink-0 flex items-center justify-between">
+          <span>
+            <span className="font-medium text-gray-400">Disclosure:</span> {disclosure.slice(0, 220)}...
+          </span>
+          <span className="hidden sm:inline text-[13px] font-mono text-gray-500">
+            Data mode: {dataMode} - {frameCount} frames - Seed 42 - offline_bundle.json
+          </span>
         </div>
       )}
 
-      {/* Main workspace - responsive 12-column grid max-w 1600 overflow-auto */}
-      <div className="flex-1 overflow-auto bg-navy-900">
+      {/* Main workspace - single-screen analysis command centre 65/35 */}
+      <div className="flex-1 overflow-auto bg-navy-900" data-testid="analysis-command-centre">
         <main className="grid grid-cols-12 gap-4 max-w-[1600px] mx-auto p-4 overflow-auto">
-          {/* Top row: Topology + Risk column - h-[60%] equivalent - keep topology col-span-8 and triage col-span-4 above */}
-          <div className="col-span-12 grid grid-cols-12 gap-4">
-            <div className="col-span-12 lg:col-span-8">
+          <div className="col-span-12 flex flex-col gap-3">
+          {/* Hero - new viewer can identify what system does from first viewport */}
+          <div className="w-full bg-navy-800 border border-navy-700 rounded-lg p-3" data-testid="analysis-hero">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" aria-hidden="true"></span>
+                  CyberWorld AI - Predictive Cybersecurity Analysis
+                  <span className="text-[13px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">Analysis Centre</span>
+                </h2>
+                <p className="text-[13px] text-gray-400 mt-1">
+                  Analyzes chronological network flows to predict rising malicious risk, explain observed evidence and global importance, show MITRE mapping, and compare preventive-action simulation before held-out ground truth.
+                </p>
+                <p className="text-[13px] font-mono text-gray-500 mt-1">
+                  Workflow: Analysis Session - Risk model - Temporal state - Stage estimate - Target ranking - Threat Explanation - Preventive Action - Before/after comparison - Confirmation
+                </p>
+              </div>
+              <div className="text-[13px] text-gray-500 bg-navy-700 rounded p-2 border border-navy-700 shrink-0">
+                <div>
+                  Data mode: <span className="text-white font-mono">{dataMode}</span> - {disclosure ? disclosure.slice(0, 60) + '...' : 'CICIDS2017 Composite'}
+                </div>
+                <div className="font-mono">
+                  Scenario: {scenarioId} - {frameCount} frames - Seed 42
+                </div>
+                <div className="font-mono">
+                  Model: {modelFamily || 'unknown'} {modelVersion || ''} - 5-frame EWMA - threshold {signals.threshold.toFixed(2)}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Analysis Progress - replaces raw replay terminology */}
+          <AnalysisProgress
+            currentFrame={currentFrame}
+            totalFrames={frameCount}
+            timestamp={current.timestamp}
+            status={analysis.status}
+            isRunning={analysis.isRunning}
+            speed={speed}
+            milestones={analysis.milestones}
+            onPause={analysis.pause}
+            onContinue={analysis.continueAnalysis}
+            onRestart={analysis.restart}
+            onSpeedChange={handleSpeedChange}
+            onFrameChange={handleFrameChange}
+            onMilestoneClick={handleMilestoneClick}
+          />
+
+          {/* Analysis Status - Baseline, Emerging risk, Early warning, Response, Confirmation */}
+          <AnalysisStatus
+            phase={phase}
+            warningActive={signals.warning}
+            stage={forecast.stage}
+            targetHost={forecast.target_ranking?.[0]?.host ?? null}
+            frameIndex={currentFrame}
+            confirmationRevealed={groundTruth.revealed}
+          />
+
+          {/* 65/35 Analysis Workspace - topology left, decision rail right */}
+          <div className="grid grid-cols-12 gap-3" data-testid="analysis-workspace">
+            {/* Topology left 65% (col-span-8 = 66.6% approx 65/35) */}
+            <div className="col-span-12 lg:col-span-8 min-h-0" data-testid="analysis-topology">
               <Topology
                 nodes={current.nodes}
                 edges={current.edges}
@@ -209,10 +336,12 @@ function App() {
                 removedEdges={simulationResult?.removed_edges as unknown as import('./api/generated').NetworkEdge[] | null}
                 simulationActive={!!simulationResult}
                 targetRanking={forecast.target_ranking}
+                isAnalysisRunning={analysis.isRunning}
               />
             </div>
 
-            <div className="col-span-12 lg:col-span-4 flex flex-col gap-4">
+            {/* Decision rail right 35% (col-span-4) - dynamic */}
+            <div className="col-span-12 lg:col-span-4 flex flex-col gap-3 min-h-0" data-testid="analysis-decision-rail">
               <RiskCard
                 rawRisk={signals.raw_risk}
                 smoothedRisk={signals.smoothed_risk}
@@ -222,43 +351,108 @@ function App() {
               />
               <StagePanel stage={forecast.stage} stageEvidenceScore={forecast.stage_evidence_score as string | undefined} evidence={forecast.evidence} />
               <TargetPanel ranking={forecast.target_ranking} predictedPath={forecast.predicted_path as Record<string, unknown> | null} />
+              {/* Preventive Action - prominent one-click workflow */}
+              <PreventiveActionPanel
+                targetRanking={forecast.target_ranking}
+                scenarioId={scenarioId}
+                frameId={currentFrame}
+                currentFrameData={current}
+                nodes={current.nodes}
+                mode={mode === 'api' ? 'api' : 'offline'}
+                simulationResult={simulationResult}
+                simulationHost={simulationHost}
+                simulationLoading={simulationLoading}
+                simulationError={simulationError}
+                onSimulateResult={(res, host) => {
+                  setSimulationResult(res);
+                  setSimulationHost(host);
+                }}
+                onLoadingChange={setSimulationLoading}
+                onErrorChange={setSimulationError}
+              />
+              {phase === 'early-warning' && (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3" data-testid="response-callout">
+                  <h4 className="text-sm font-bold text-amber-400 flex items-center gap-2">
+                    Response - Preventive Action
+                  </h4>
+                  <p className="text-[13px] text-amber-300 mt-1">
+                    Early warning active at frame {currentFrame} - review target {forecast.target_ranking?.[0]?.host ?? 'host-N'} and use the prominent Simulate Preventive Action control above or the What-if Isolation tab below.
+                  </p>
+                  <button
+                    onClick={() => {
+                      const el = document.querySelector('[data-testid="workspace-tabs"]');
+                      // try to switch to simulation tab via click
+                      const tab = document.querySelector('[role="tab"][aria-controls="tab-simulation"]') as HTMLElement | null;
+                      tab?.click();
+                      el?.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                    className="mt-2 px-3 py-1.5 rounded bg-amber-500 text-slate-900 font-bold text-[13px] focus:outline-none focus:ring-2 focus:ring-cyan-400"
+                  >
+                    Go to What-if Isolation
+                  </button>
+                </div>
+              )}
+              {phase === 'confirmation' && (
+                <div className="bg-coral-500/10 border border-coral-500/30 rounded-lg p-3" data-testid="confirmation-callout">
+                  <h4 className="text-sm font-bold text-coral-400">Confirmation - Ground Truth Revealed</h4>
+                  <p className="text-[13px] text-coral-300 mt-1">
+                    {groundTruth.event} - {groundTruth.attack_type ?? ''} at frame {groundTruth.ground_truth_frame ?? 20} - Warning lead was {analysis.milestones.warningLeadFrames ?? '?'} frames.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* RiskChart - preserved observed+predicted risk visualization - not part of tabbed workspace but kept for trajectory continuity */}
+          {/* Threat Explanation - concise data-derived consolidation */}
+          <div className="col-span-12">
+            <ThreatExplanation frame={current} metrics={metrics} />
+          </div>
+
+          {/* RiskChart - preserved observed+predicted risk visualization */}
           <div className="col-span-12">
             <RiskChart frames={frames} currentFrame={currentFrame} />
           </div>
 
-          {/* Lower workspace - tabbed container - below topology - col-span-12 - reusing existing panels without rewriting internal logic */}
-          <div className="col-span-12" data-testid="lower-workspace">
-            <WorkspaceTabs
+          {/* Technical Proof Drawer - expandable detailed evidence, MITRE, metrics, method and limitations - same interface */}
+          <div className="col-span-12">
+            <TechnicalProofDrawer
               evidence={forecast.evidence}
               metrics={metrics}
               techniques={forecast.mitre}
               mitreVersion={mitreVersion}
               scenarioId={scenarioId}
               frameId={currentFrame}
-              nodes={current.nodes}
-              targetRanking={forecast.target_ranking}
-              currentFrameData={current}
-              mode={mode}
-              simulationResult={simulationResult}
-              simulationLoading={simulationLoading}
-              simulationError={simulationError}
-              onSimulateResult={(res, host) => {
-                setSimulationResult(res);
-                setSimulationHost(host);
-              }}
-              onLoadingChange={setSimulationLoading}
-              onErrorChange={setSimulationError}
-              frames={frames}
-              currentFrame={currentFrame}
-            />
+            >
+              <div data-testid="lower-workspace" className="col-span-12">
+                <WorkspaceTabs
+                  evidence={forecast.evidence}
+                  metrics={metrics}
+                  techniques={forecast.mitre}
+                  mitreVersion={mitreVersion}
+                  scenarioId={scenarioId}
+                  frameId={currentFrame}
+                  nodes={current.nodes}
+                  targetRanking={forecast.target_ranking}
+                  currentFrameData={current}
+                  mode={mode}
+                  simulationResult={simulationResult}
+                  simulationLoading={simulationLoading}
+                  simulationError={simulationError}
+                  onSimulateResult={(res, host) => {
+                    setSimulationResult(res);
+                    setSimulationHost(host);
+                  }}
+                  onLoadingChange={setSimulationLoading}
+                  onErrorChange={setSimulationError}
+                  frames={frames}
+                  currentFrame={currentFrame}
+                />
+              </div>
+            </TechnicalProofDrawer>
           </div>
 
           {/* Ground Truth & Flow Summary - below tabs - gated ground_truth hidden before 20 preserved, synthetic fallback visible */}
-          <div className="col-span-12 grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             {/* Ground Truth - gated */}
             <div
               className={`bg-navy-800 border rounded-lg p-4 flex flex-col gap-2 ${groundTruth.revealed ? 'border-coral-500 bg-coral-500/5' : 'border-navy-700'}`}
@@ -375,6 +569,7 @@ function App() {
           {/* Footer for visual language compliance */}
           <div className="col-span-12 text-[13px] text-gray-500 text-center py-2 border-t border-navy-700">
             Visual language: Navy background/surfaces - Cyan observed/healthy - Purple prediction - Orange simulation - Coral critical - Dashed predicted - Muted removed - Text labels and icons accompany every color state - 1280x720 and 1440x900 readable - No WebSocket - Deterministic seed 42
+          </div>
           </div>
         </main>
       </div>

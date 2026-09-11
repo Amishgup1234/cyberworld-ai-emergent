@@ -307,6 +307,19 @@ for (const vp of viewports) {
       await page.setViewportSize({ width: vp.width, height: vp.height });
       await page.goto('/');
       await expect(page.getByTestId('topology')).toBeVisible({ timeout: 15000 });
+      // Phase 16 auto-start may have progressed to warning frame 8; reset to baseline 0 for deterministic host set
+      const initialVal = await page.getByTestId('frame-slider').inputValue().catch(() => '0');
+      if (initialVal !== '0') {
+        await page.getByTestId('restart-btn').click();
+        await page.waitForTimeout(400);
+        await expect(page.getByTestId('frame-slider')).toHaveValue('0', { timeout: 5000 });
+      }
+      // Ensure paused at baseline
+      const isPause = await page.getByTestId('play-pause-btn').evaluate((el) => el.textContent?.includes('Pause'));
+      if (isPause) {
+        await page.getByTestId('play-pause-btn').click();
+        await page.waitForTimeout(200);
+      }
       await page.waitForTimeout(900);
 
       // Determine host nodes (exclude cluster-background)
@@ -347,8 +360,22 @@ for (const vp of viewports) {
       await page.setViewportSize({ width: vp.width, height: vp.height });
       await page.goto('/');
       await expect(page.getByTestId('topology')).toBeVisible({ timeout: 15000 });
+      const initVal2 = await page.getByTestId('frame-slider').inputValue().catch(() => '0');
+      if (initVal2 !== '0') {
+        await page.getByTestId('restart-btn').click();
+        await page.waitForTimeout(400);
+        await expect(page.getByTestId('frame-slider')).toHaveValue('0', { timeout: 5000 });
+      }
+      const isPause2 = await page.getByTestId('play-pause-btn').evaluate((el) => el.textContent?.includes('Pause'));
+      if (isPause2) {
+        await page.getByTestId('play-pause-btn').click();
+        await page.waitForTimeout(200);
+      }
       await page.waitForTimeout(900);
 
+      // Ensure topology is scrolled into view for center hit testing (Phase 16 hero pushes topology below fold at 1280x720)
+      await page.getByTestId('topology').scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
       const nodes = page.locator('.react-flow__node');
       const count = await nodes.count();
       let hostCount = 0;
@@ -357,6 +384,8 @@ for (const vp of viewports) {
         const dataId = await el.getAttribute('data-id');
         if (dataId === 'cluster-background') continue;
         hostCount++;
+        await el.scrollIntoViewIfNeeded();
+        await page.waitForTimeout(100);
         const box = await el.boundingBox();
         expect(box).not.toBeNull();
         if (!box) continue;
@@ -383,6 +412,17 @@ for (const vp of viewports) {
       await page.setViewportSize({ width: vp.width, height: vp.height });
       await page.goto('/');
       await expect(page.getByTestId('topology')).toBeVisible({ timeout: 15000 });
+      const initVal3 = await page.getByTestId('frame-slider').inputValue().catch(() => '0');
+      if (initVal3 !== '0') {
+        await page.getByTestId('restart-btn').click();
+        await page.waitForTimeout(400);
+        await expect(page.getByTestId('frame-slider')).toHaveValue('0', { timeout: 5000 });
+      }
+      const isPause3 = await page.getByTestId('play-pause-btn').evaluate((el) => el.textContent?.includes('Pause'));
+      if (isPause3) {
+        await page.getByTestId('play-pause-btn').click();
+        await page.waitForTimeout(200);
+      }
       await page.waitForTimeout(1000);
 
       const nodes = page.locator('.react-flow__node');

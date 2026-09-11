@@ -1,12 +1,12 @@
 # CyberWorld AI
 
-Predictive cybersecurity decision-support prototype - two-day MVP.
-Replay -> Risk model -> Temporal state -> Stage estimate -> Target ranking -> Evidence and MITRE -> Simulated isolation -> Before/after comparison
+Predictive cybersecurity decision-support prototype - final product experience: Analyze, explain, and respond.
+Analysis Session -> Risk model -> Temporal state -> Stage estimate -> Target ranking -> Threat Explanation (Evidence and MITRE) -> Preventive Action (Simulated) -> Before/after comparison -> Confirmation
 
 **Live demo:** [cyberworld-ai-mvp.vercel.app](https://cyberworld-ai-mvp.vercel.app)
 
 ## Overview
-CyberWorld AI replays chronological network flows, detects rising malicious activity, builds an evolving host-and-connection view, estimates what may happen next, explains the evidence, and lets an analyst simulate isolating a suspicious host. The complete 11-step accepted story must work twice from clean startup and once in offline fallback mode with no internet.
+CyberWorld AI analyzes chronological network flows via an automated analysis session, detects rising malicious activity, builds an evolving host-and-connection view, estimates what may happen next, consolidates a data-derived threat explanation, and lets an analyst simulate a preventive action on the top graph-ranked host before held-out confirmation. The complete analysis story (baseline -> emerging risk -> early warning -> response -> confirmation) must work twice from clean startup and once in offline fallback mode with no internet. The system automatically pauses at early warning for analyst review and uses prominent Preventive Action controls, not raw replay/video language.
 
 ## Quick Start
 
@@ -98,14 +98,14 @@ cyberworld-ai/
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
-│   │   ├── App.tsx (health/mode/scenario orchestrator with loading/empty/invalid-data/backend-down/reset states)
-│   │   ├── components/ (command bar, replay timeline, topology, risk, evidence, MITRE, metrics and simulation panels)
-│   │   ├── hooks/ (useHealthCheck, useScenarioData, useReplayController)
+│   │   ├── App.tsx (health/mode/scenario orchestrator with analysis session, 65/35 command centre, threat explanation, preventive action, loading/empty/invalid-data/backend-down states)
+│   │   ├── components/ (CommandBar, AnalysisProgress, AnalysisStatus, ThreatExplanation, TechnicalProofDrawer, PreventiveActionPanel, Topology with motion, RiskCard, RiskChart, StagePanel, TargetPanel, WorkspaceTabs, Evidence/MITRE/Metrics/Simulation panels)
+│   │   ├── hooks/ (useHealthCheck, useScenarioData, useAnalysisSession with milestones, useReplayController retained for timing)
 │   │   ├── api/ (client with offline fallback, generated.ts from OpenAPI)
-│   │   ├── utils/simulation.ts (offline isolation fallback)
-│   │   └── __tests__/ (52 Vitest component and application tests)
-│   ├── e2e/ (55 Playwright tests covering the demo, UI, accessibility and reliability)
-│   ├── public/offline_bundle.json (generated from same engine, not hardcoded)
+│   │   ├── utils/simulation.ts (offline isolation fallback, same factor table)
+│   │   └── __tests__/ (62 Vitest tests: App, Simulation, AnalysisSession, Topology, WorkspaceTabs)
+│   ├── e2e/ (73 Playwright tests: demo 7, shell 13, topology 14, workspace 13, visual-regression 14, analysis 7, threat 6, preventive 5 + shell overlap)
+│   ├── public/offline_bundle.json (generated from same engine, not hardcoded, 30 frames, seed 42)
 │   ├── playwright.config.ts (webServer build+preview on 4173)
 │   ├── vite.config.ts (proxy /api to :8000)
 │   ├── vercel.json (Vite build and SPA routing)
@@ -160,24 +160,27 @@ Generate TypeScript API types: `python -m scripts.generate_types` (auto wrt Open
 - Stage rule-derived (Normal/Recon/Credential/Compromise/Impact), target graph-ranked (incoming+1)*novelty*risk_trend*criticality, evidence deterministic, importance global RF not causal, MITRE local 13.1 T1046/T1110/T1021/T1498 cautious.
 
 ## Architecture (see ARCHITECTURE.md)
-Replay -> Risk (RF 80 feats) -> Temporal (5 EWMA+slope) -> Stage (evidence score) -> Target (NetworkX) -> Evidence/MITRE (separate, pinned) -> Simulate (clone+remove+recalc) -> Before/after. Offline fallback from same engine, health-check at startup, mode banner visible, no WebSocket, deterministic seed 42.
+Analysis Session (auto-start, pause at warning 8 and confirmation 20, milestone navigation) -> Risk (RF 80 feats, learned binary) -> Temporal (5 EWMA+slope, rule-derived) -> Stage (evidence score, rule-derived) -> Target (NetworkX graph-ranked) -> Threat Explanation (consolidated risk/stage/target/evidence/MITRE, distinct labels) -> Technical Proof Drawer (expandable detailed evidence/MITRE/measured metrics/method/limitations, same interface) -> Preventive Action (one prominent Simulate Preventive Action, before/after risk, changed ranking, stage change, risk reduction, removed muted edges, Estimated simulated effect - not causal proof) -> Confirmation (gated ground truth at 20, coral pulse) -> Measured Metrics (honest F1 0.844 etc). Offline fallback from same engine, health-check at startup, mode banner visible, no WebSocket, deterministic seed 42, motion for analysis/observed/predicted/warning/confirmation with reduced-motion support.
 
 ## Visual Language
 - Navy #0f172a background, cyan observed/healthy, purple prediction, orange simulation, coral critical/ground truth, dashed predicted, muted removed, text+icon never color alone.
+- Motion for analysis (analysis pulse when running), observed activity (high-activity edges dash when activity >4), predicted path (purple dashed animated), warning target pulse (top host when warning), confirmation pulse (coral when ground truth revealed) - all data-derived, never invents nodes/edges/paths, disabled via prefers-reduced-motion: reduce.
+- Threat Explanation consolidates learned/rule-derived/graph-ranked/measured/simulated with distinct badges and colors, not color alone.
+- Technical Proof drawer expandable with focus ring and Escape, keyboard accessible, reduced-motion disables transition.
 
-## Final Acceptance Story (see DEMO_SCRIPT.md for per-second script)
-1 Normal network (frame0 Normal, no warning, ground truth hidden gated)
-2 Chronological replay begins (Play/Pause/Restart 0.5x/1x/2x, Space/R/arrows, client timing)
-3 Observed behavior changes (port diversity, SYN, predicted ratio)
-4 Model risk rises (smoothed EWMA, slope)
-5 Early warning appears before ground truth (8 before 20 lead 12)
-6 Stage evidence and graph-ranked host appear (stage + top host + predicted purple dashed)
-7 MITRE mapping and evidence are opened (observed vs importance separate, pinned 13.1)
-8 Suspicious host is isolated in simulation (host-select top ranked pre-selected, orange Simulate, deepcopy)
-9 Before/after risk is compared (raw/smoothed deltas, risk_reduction %, stage_changed, removed muted, ranking changed)
-10 Ground truth arrives (20 revealed Infiltration, label_distribution, true_malicious_ratio)
-11 Actual held-out metrics are shown (honest F1 etc, PASS/MISS, limitations visible)
-Must work twice clean API and once offline. Usable at 1280x720 and 1440x900, keyboard-accessible.
+## Final Acceptance Story - Analyze, Explain, and Respond (see DEMO_SCRIPT.md for per-second script, no raw replay/video language)
+1 Baseline (frame 0 Normal, no warning, ground truth hidden gated, analysis session auto-starts)
+2 Analysis Session begins automatically (Analysis Progress Pause/Continue/Restart Analysis 0.5x/1x/2x, Space/R/Arrow, milestone navigation Baseline/Emerging/Warning/Confirmation, client timing, no WebSocket)
+3 Observed behavior changes (port diversity, SYN, predicted ratio, threat explanation shows emerging risk)
+4 Model risk rises (learned raw risk, smoothed 5-frame EWMA, slope positive, risk card shows threshold)
+5 Early warning appears automatically within 10 seconds before ground truth and pauses (frame 8 before 20 lead 12, smoothed >0.45 and slope >0, warning banner orange, risk card warning, topology warning pulse and predicted purple dashed)
+6 Threat explanation consolidates stage evidence and graph-ranked host (rule-derived stage with evidence score, top host Rank #1 graph-ranked score 14.5 host-238, predicted path, observed evidence and MITRE kept separate, pinned 13.1)
+7 Technical proof is available via expandable drawer (observed vs global importance not causal, MITRE 4 cards, honest measured metrics 0.844 F1 miss, method and limitations, same interface)
+8 Preventive action is simulated with one analyst action (recommended top host host-238 pre-selected, prominent Simulate Preventive Action orange gradient, clones frame, removes host edges muted orange, recalculates, same pipeline, original unchanged - Estimated simulated effect - not causal proof)
+9 Containment result is compared in one card (before/after raw 0.62 vs 0.34, smoothed, warning, stage changed, ranking changed host-238 vs host-X, risk reduction percent, removed edges list 2-8 edges muted orange dashed, ranking re-computed)
+10 Confirmation arrives (frame 20 revealed Infiltration, label distribution, true_malicious_ratio 0.576, topology coral pulse, ground truth panel revealed)
+11 Actual held-out confirmation and measured metrics are shown (honest F1 macro 0.844 miss, recall 0.745 miss, FPR 0.012 pass, PR-AUC 0.898 ROC-AUC 0.784, p95 13.9ms pass, limitations visible, provenance synthetic disclosed)
+Must work twice clean API (backend healthy) and once offline (backend down, offline_bundle.json same engine, not hardcoded) within two minutes. Usable at 1280x720 and 1440x900, keyboard-accessible, color never alone, reduced-motion supported.
 
 ## Reliability States
 - Loading: Starting CyberWorld AI... with spinner + Health-checking backend - fallback to offline_bundle.json if unavailable (data-testid loading-state)

@@ -62,6 +62,21 @@ test.describe('CyberWorld AI - Two-minute demo (11 steps) + reliability', () => 
     await expect(page.getByTestId('brand-title')).toContainText('CYBERWORLD AI');
     // Step 1: Normal network - frame 0 stage Normal, no warning, ground truth hidden
     await expect(page.getByTestId('mode-banner')).toBeVisible();
+    // Phase 16 auto-start: analysis may have already progressed to warning frame 8; reset to baseline for deterministic demo start
+    const initialVal = await page.getByTestId('frame-slider').inputValue().catch(() => '0');
+    if (initialVal !== '0') {
+      await page.getByTestId('restart-btn').click();
+      await page.waitForTimeout(400);
+      await expect(page.getByTestId('frame-slider')).toHaveValue('0', { timeout: 5000 });
+      await expect(page.getByTestId('play-pause-btn')).toContainText('Play');
+    }
+    // Ensure analysis is paused at baseline before proceeding (if auto-running, pause)
+    const isPauseVisible = await page.getByTestId('play-pause-btn').evaluate((el) => el.textContent?.includes('Pause'));
+    if (isPauseVisible) {
+      await page.getByTestId('play-pause-btn').click();
+      await page.waitForTimeout(300);
+      await expect(page.getByTestId('play-pause-btn')).toContainText('Play');
+    }
     // Offline fallback expected when no backend (preview server)
     await expect(page.getByTestId('mode-banner')).toContainText(/Offline Mode|API Mode/);
     // Dataset badge - responsive: visible at 1440, hidden at 1280 per Phase 11

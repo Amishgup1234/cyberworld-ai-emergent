@@ -1,4 +1,4 @@
-# Architecture - CyberWorld AI
+# Architecture - CyberWorld AI - Final Product Experience
 
 ## System Diagram (text)
 ```
@@ -33,32 +33,32 @@
     |  API mode -> live calls; Offline Mode -> offline_bundle + offlineSimulateIsolation (same formula, factor table)
     |  visible banner: API Mode (cyan) vs Offline Mode (orange, with truthful reason)
     |
-    Full-screen SOC Dashboard (1280x720 and 1440x900 responsive, Tailwind)
-    +-- Header: title, API/Offline badge, dataset badge (Synthetic Fallback vs CICIDS2017), source URL
-    +-- Mode banner: Active mode text + health
-    +-- ReplayControls: Play/Pause/Restart, speed 0.5x/1x/2x (keyboard Space/R/arrows), slider 0..29, progress, chronological no WebSocket
-    +-- Grid top: Topology (React Flow) + RiskCard | StagePanel | TargetPanel
-    +-- SimulationPanel: host-select dropdown (top ranked pre-selected, keyboard accessible), orange Simulate button, before/after (cyan observed vs orange simulated), deltas, removed-edges muted, ranking change, non-causal label
-    +-- Grid middle: RiskChart (Recharts, raw cyan, smoothed purple, threshold orange dashed, warning coral) + TrajectoryPanel (timeline dots) + EvidencePanel (Observed cyan vs Importance purple, not causal)
-    +-- Grid bottom: MitrePanel (pinned 13.1, 4 cards T1046/T1110/T1021/T1498, evidence rule + confidence) + MetricsPanel (honest gated metrics) + GroundTruth (gated reveal at 20, attack_type Infiltration) + Flow Summary (observed + predicted separate) + EngineMetadata
-    +-- Footer: visual language legend; color never alone (text+icon accompanies)
-
-Reliability states: Loading (spinner Starting CyberWorld AI... + health message) | Empty (0 frames) | Invalid-data (missing fields validation) | Backend-down (Failed to Load Scenario, offline_bundle hint) | Reset (Restart + Clear simulation).
+    Full-screen Analysis Command Centre (1280x720 and 1440x900 responsive, Tailwind, 65/35)
+    +-- CommandBar: title CYBERWORLD AI, SOC-v3.1, API/Offline badges, dataset badge, help
+    +-- AnalysisProgress: Analysis Session, Analysis Progress Pause/Continue/Restart Analysis, speed 0.5x/1x/2x (Space/R/Arrow, milestone nav Baseline/Emerging/Warning/Confirmation), slider 0..29, progress, chronological no WebSocket, auto-start and pause at warning 8 and confirmation 20 via useAnalysisSession
+    +-- AnalysisStatus: Baseline/Emerging risk/Early warning/Response/Confirmation phases with icons/colors, reduced-motion
+    +-- Grid 65/35: Topology left (React Flow, motion for analysis/observed/predicted/warning/confirmation, reduced-motion, safe host-N) + Decision Rail right (RiskCard learned, StagePanel rule-derived, TargetPanel graph-ranked, PreventiveActionPanel with recommended host and prominent Simulate Preventive Action)
+    +-- ThreatExplanation: consolidated risk/stage/target/evidence/MITRE with distinct Learned/Rule-derived/Graph-ranked/Measured/Simulated badges, data-derived, not hardcoded
+    +-- RiskChart (Recharts, raw cyan, smoothed purple, threshold orange dashed, warning coral) + TrajectoryPanel
+    +-- TechnicalProofDrawer: expandable (aria-expanded, focus ring, Escape, reduced-motion) wrapping WorkspaceTabs (Evidence/MITRE/Simulation/Metrics/Trajectory) + detailed evidence vs importance, MITRE 13.1, honest metrics, method/limitations, same interface
+    +-- GroundTruth (gated reveal at 20, attack_type Infiltration, coral) + Flow Summary (observed + predicted separate) + EngineMetadata + Footer legend (color never alone, motion, reduced-motion)
 ```
 
-## Data Flow - 11-step accepted story
+Reliability states: Loading (spinner Starting CyberWorld AI... + health message) | Empty (0 frames) | Invalid-data (missing fields validation) | Backend-down (Failed to Load Scenario, offline_bundle hint) | Reset (Restart Analysis + Clear simulation).
+
+## Data Flow - 11-step final acceptance story (analyze, explain, respond)
 ```
-1 Normal network (frames 0-2 smoothed 0.21 <0.45, stage Normal, no warning, ground truth hidden)
-2 Chronological replay begins (client-side timing, play/pause/restart/0.5x/1x/2x, no WebSocket, frame slider)
-3 Observed behavior changes (port diversity, SYN, predicted ratio model-predicted, bytes/packets)
-4 Model risk rises (raw risk learned, smoothed EWMA alpha0.4, slope positive)
-5 Early warning appears before ground truth (warning at 8, ground truth at 20, lead 12 frames, requires smoothed>thr && slope>0 frozen 0.45)
-6 Stage evidence and graph-ranked host appear (stage rule-derived, target ranking NetworkX top host)
-7 MITRE mapping and evidence are opened (observed evidence deterministic vs global importance not causal, pinned 13.1 four techniques)
-8 Suspicious host is isolated in simulation (host-select, clone frame, remove/down-weight host active edges, recalc graph/risk)
-9 Before/after risk is compared (raw/smoothed/slope/warning/stage/ranking deltas, risk_reduction %, stage_changed, muted removed edges)
-10 Ground truth arrives (frame 20 revealed Infiltration, label_distribution, true_malicious_ratio 0.576)
-11 Actual held-out metrics are shown (F1 macro 0.844, recall 0.745, FPR 0.012, PR-AUC 0.898, ROC-AUC 0.784, p95 13.9ms, gates honest PASS/MISS, claim limitations visible)
+1 Baseline (frames 0-2 smoothed 0.21 <0.45, stage Normal, no warning, ground truth hidden, analysis session auto-starts, threat explanation shows baseline)
+2 Analysis Session begins automatically (analysis progress Pause/Continue/Restart Analysis, milestone nav Baseline/Emerging/Warning/Confirmation, speed 0.5x/1x/2x, Space/R/Arrow, client timing, no WebSocket, auto-pauses at warning)
+3 Observed behavior changes (port diversity, SYN, predicted ratio model-predicted, bytes/packets, topology observed activity motion)
+4 Model risk rises (learned raw risk, smoothed 5-frame EWMA alpha0.4, slope positive, risk card threshold, threat explanation risk section)
+5 Early warning appears automatically within 10 seconds before ground truth and pauses (warning at 8, ground truth at 20, lead 12, requires smoothed>0.45 && slope>0 frozen 0.45, warning banner orange, topology warning pulse and predicted purple dashed)
+6 Threat explanation consolidates stage evidence and graph-ranked host (rule-derived stage with evidence score, top host Rank #1 graph-ranked host-238 score 14.5, predicted path, observed evidence and MITRE kept separate, pinned 13.1, distinct badges)
+7 Technical proof is available via expandable drawer (observed vs global importance not causal, MITRE 4 cards, honest measured metrics, method and limitations, same interface, keyboard accessible, reduced-motion)
+8 Preventive action is simulated with one analyst action (recommended top host host-238 pre-selected, prominent Simulate Preventive Action orange gradient, clones frame, removes host edges muted orange, recalculates, same pipeline, original unchanged - Estimated simulated effect - not causal proof)
+9 Containment result is compared in one card (before/after raw 0.62 vs 0.34, smoothed, warning, stage changed, ranking changed host-238 vs host-X, risk reduction percent, removed edges list muted orange dashed, ranking re-computed, topology muted edges)
+10 Confirmation arrives (frame 20 revealed Infiltration, label_distribution, true_malicious_ratio 0.576, topology coral pulse, ground truth panel revealed, analysis status Confirmation)
+11 Actual held-out confirmation and measured metrics are shown (F1 macro 0.844 miss, recall 0.745 miss, FPR 0.012 pass, PR-AUC 0.898 ROC-AUC 0.784, p95 13.9ms pass, gates honest PASS/MISS, claim limitations visible, provenance synthetic disclosed)
 ```
 
 ## Offline Fallback
@@ -67,27 +67,31 @@ Reliability states: Loading (spinner Starting CyberWorld AI... + health message)
 - useScenarioData: api mode tries fetchScenarioDetail + fetchMetrics, falls back to fetchOfflineBundle on catch; offline mode loads bundle directly.
 - Active mode visibly displayed in banner + Header badge. Backend failure does not prevent offline replay (verified via App.test offline cases and Playwright offline intercept).
 - Isolation in offline uses utils/simulation.ts offlineSimulateIsolation with same ranking formula and factor table (rank 1 ->0.55, <=3 ->0.65, <=5 ->0.75, else 0.85, minus 0.05 if host risk > threshold), recalculated warning/stage, same non-causal label.
+- Analysis session works in both modes (client timing, no WebSocket), offline_bundle has same 30 frames, so early warning appears within 10 seconds in both.
 
-## Claim Boundaries (visible everywhere)
-- **Learned:** binary benign-versus-malicious risk only (Random Forest probability) - raw_risk, black-box.
-- **Rule-derived:** five-frame EWMA, slope, threshold, warning logic, stage estimate evidence score - not calibrated probability.
-- **Graph-ranked:** NetworkX target ranking/predicted path - not learned target classifier.
-- **Simulated:** host isolation is estimated simulated effect - not causal proof, immutable clone, original unchanged.
-- **Measured:** metrics.json honest values with gates (F1 0.844 miss, recall 0.745 miss, FPR 0.012 pass, p95 13.9ms pass) - UI shows PASS/MISS honestly, never implies missed gate passed.
-Labels use text alongside color per visual language.
+## Claim Boundaries (visible everywhere, distinct)
+- **Learned:** binary benign-versus-malicious risk only (Random Forest probability) - raw_risk, black-box, badge cyan.
+- **Rule-derived:** five-frame EWMA, slope, threshold, warning logic, stage estimate evidence score - not calibrated probability, badge yellow.
+- **Graph-ranked:** NetworkX target ranking/predicted path - not learned target classifier, badge purple.
+- **Simulated:** host isolation is estimated simulated effect - not causal proof, immutable clone, original unchanged, badge orange.
+- **Measured:** metrics.json honest values with gates (F1 0.844 miss, recall 0.745 miss, FPR 0.012 pass, p95 13.9ms pass) - UI shows PASS/MISS honestly, never implies missed gate passed, badge slate.
+Labels use text alongside color per visual language, distinct in ThreatExplanation and TechnicalProofDrawer.
 
 ## Visual Language
 - Navy background #0f172a/#111827 and surfaces #1f2937.
 - Cyan #22d3ee for observed/healthy state (solid edge, healthy risk).
 - Purple #a855f7 for model prediction (smoothed EWMA, predicted path dashed, top target).
-- Orange #fb923c for simulation (simulated after, removed edges muted 0.45 opacity dashed 4 4, badge).
-- Coral #f87171 for critical risk and ground truth (warning alert, high criticality).
-- Dashed edge for predicted path (purple, 6 3, animated).
+- Orange #fb923c for simulation (simulated after, removed edges muted 0.45 opacity dashed 4 4, badge, prominent Preventive Action gradient).
+- Coral #f87171 for critical risk and ground truth (warning alert, high criticality, confirmation pulse).
+- Dashed edge for predicted path (purple, 6 3, animated, respects reduced-motion).
 - Muted edge for removed simulated path (orange, 4 4, opacity 0.45, label removed - simulated).
 - Text labels and icons accompany every color state (lucide-react icons + status text).
+- Motion for analysis (analysis pulse when running), observed activity (high-activity edges dash when activity >4), predicted path (purple dashed animated), warning target pulse (top host when warning), confirmation pulse (coral when ground truth revealed) - all data-derived, never invents nodes/edges/paths, disabled via prefers-reduced-motion: reduce.
+- Threat Explanation consolidates with distinct badges, not color alone.
+- Technical Proof drawer expandable with focus ring and Escape, reduced-motion disables transition.
 
 ## Tech Stack Boundaries
-- Frontend: React 18/19, TypeScript strict, Vite 5, Tailwind 3, React Flow 11, Recharts 2, lucide-react, Vitest + Playwright.
+- Frontend: React 18/19, TypeScript strict, Vite 5, Tailwind 3, React Flow 11, Recharts 2, lucide-react, Vitest + Playwright, useAnalysisSession for milestones.
 - Backend: Python 3.12, FastAPI + Uvicorn, Pydantic, Pandas, NumPy, scikit-learn 1.5, NetworkX 3.3, joblib, pytest.
 - Excluded: PyTorch, LSTM/GRU/Transformer/GNN, SHAP, PCAP ingestion, WebSocket streaming, DB/auth/multi-user/Docker/cloud, real firewall/SOAR actions, SMOTE.
 
@@ -95,13 +99,14 @@ Labels use text alongside color per visual language.
 - Seed 42 everywhere (preprocessing clip/impute, model random_state, replay stitching, synthetic fallback generation).
 - Artifacts include full scaler params, imputation medians, clip bounds, feature order, train_only flags, version phase03-v1-sealed.
 - Re-running generate_scenario twice produces identical frames within 1e-9 (verified replay tests).
+- Analysis milestones derived from scenario data, not hardcoded frame numbers, verified via AnalysisSession.test.
 
 ## Reliability States
 - **Loading:** "Starting CyberWorld AI..." with spinner (aria-hidden) and "Health-checking backend - fallback to offline_bundle.json if unavailable" - shown while !checked || loading. Data-testid loading-state.
 - **Empty:** when scenario.frames.length ===0 - centered card "No Replay Data Available" explaining 30-frame requirement, data-testid empty-state, hints to regenerate demo/offline bundle.
 - **Invalid-data:** when validation finds missing timestamp/nodes/edges/signals/forecast/ground_truth/flow_summary or signals subfields - card "Invalid Scenario Data" with Missing required field reason, remediation steps, data-testid invalid-data-state. Validated via validateScenario helper inspecting first frame shape.
 - **Backend-down:** when error or !scenario or !current after health check - card "Failed to Load Scenario" with error text, offline hint, mode/health line, data-testid backend-down-state. Also shown when both API and offline fetch fail.
-- **Reset:** Restart button (data-testid restart-btn, label Restart replay from beginning) sets currentFrame 0 and isPlaying false; Clear button in SimulationPanel (aria-label Clear simulation) nulls simulationResult, restores banner to original replay unchanged. Trajectory + RiskChart reflect reset.
+- **Reset:** Restart Analysis button (data-testid restart-analysis-btn, label Restart Analysis) + restart-btn legacy sets currentFrame 0 and status ready; Clear buttons in SimulationPanel and PreventiveActionPanel null simulationResult, restores banner to original replay unchanged. Trajectory + RiskChart reflect reset.
 
 ## Security and Repo Boundaries
 - .gitignore excludes .venv, data/raw, artifacts/*.joblib, .env, datasets, model binaries.
@@ -110,13 +115,13 @@ Labels use text alongside color per visual language.
 - No destructive git operations or push in MVP.
 
 ## File Map
-- `backend/app/replay/scenario.py` - temporal state, ranking, disclosure, gatings.
+- `backend/app/replay/scenario.py` - temporal state, ranking, disclosure, gatings, same engine for bundles.
 - `backend/app/api/*` - health/metrics/scenarios/forecast/simulate (Pydantic schemas, 422/404 structured errors).
 - `backend/app/state.py` - load_state once.
 - `artifacts/*` - feature_schema.json, risk_model.joblib, metrics.json.
-- `data/demo/cyberworld_replay.json` + `frontend/public/offline_bundle.json` - same engine.
-- `frontend/src/App.tsx` - health/mode/scenario orchestrator with reliability states.
-- `frontend/src/components/*` - each panel with data-testid for E2E.
-- `frontend/src/hooks/useHealthCheck`, `useScenarioData`, `useReplayController` - timing, fallback, keyboard accessible.
-- `frontend/src/utils/simulation.ts` - offline isolation fallback.
-- `frontend/e2e/demo.spec.ts` + `playwright.config.ts` - reliability E2E.
+- `data/demo/cyberworld_replay.json` + `frontend/public/offline_bundle.json` - same engine, 30 frames.
+- `frontend/src/App.tsx` - health/mode/scenario orchestrator with analysis command centre 65/35, threat explanation, preventive action, reliability states.
+- `frontend/src/components/AnalysisProgress`, `AnalysisStatus`, `ThreatExplanation`, `TechnicalProofDrawer`, `PreventiveActionPanel`, `Topology` (with motion), `RiskCard`, `RiskChart`, `StagePanel`, `TargetPanel`, `WorkspaceTabs`, `EvidencePanel`, `MitrePanel`, `MetricsPanel`, `SimulationPanel`, `HostDetailsDrawer` - each panel with data-testid for E2E.
+- `frontend/src/hooks/useHealthCheck`, `useScenarioData`, `useAnalysisSession` (milestones, auto-start, pause at warning/confirmation, safe navigation), `useReplayController` (retained for timing).
+- `frontend/src/utils/simulation.ts` - offline isolation fallback, same factor table.
+- `frontend/e2e/demo.spec.ts`, `analysis.spec.ts`, `threat.spec.ts`, `preventive.spec.ts`, `shell.spec.ts`, `topology.spec.ts`, `workspace.spec.ts`, `visual-regression.spec.ts` + `playwright.config.ts` - full E2E (73 tests).
