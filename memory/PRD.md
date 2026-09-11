@@ -1,56 +1,57 @@
 # CyberWorld AI — Predictive Cybersecurity Command Centre
 
 ## Original Problem Statement
-"create a great ui ux for this" — user provided PDF pitch deck for CyberWorld AI, a
-Predictive Cybersecurity Platform that uses a Network Digital Twin to forecast attacks
-across the MITRE ATT&CK lifecycle. Tagline: *Predict · Explain · Simulate · Defend*.
+User provided PDF pitch deck for CyberWorld AI (Predictive Cybersecurity Platform,
+Network Digital Twin, MITRE ATT&CK lifecycle). Started with "create a great ui/ux",
+progressed to "now make a complete working app" — full stack, real backend, real data.
 
-## User Choices (2026-01)
-- Interactive product dashboard demo (not a marketing landing page)
-- Dark cyber / tactical aesthetic (midnight bg, neon cyan/lime, mono terminal)
-- Content sourced directly from the PDF
-- Animated interactive Network Digital Twin as the hero centerpiece
-- Goal: "great UI/UX that looks like a great cybersecurity app in an AI way"
+## Architecture (complete working app · 2026-01)
+- **Backend**: FastAPI + Motor (async MongoDB), single-file `/app/backend/server.py`
+  - Seeds 3 attack scenarios and 3 tenants on startup (idempotent upserts)
+  - Server-side frame computation (kill-chain probabilities, node risk escalation, edge visibility, MITRE unlock, XAI activation, target predictions, KPIs, log tail)
+  - Simulation endpoint applies mitigation deltas against peak target risk
+  - Incident bundle persistence + list per tenant
+- **Frontend**: Vite + React 18 + TypeScript, tactical cyber design system
+  - `src/api/client.ts` fully typed API client
+  - Same-origin `/api` routing (Kubernetes ingress → :8001)
+  - Dark cyber aesthetic (Chakra Petch, IBM Plex, JetBrains Mono, grain, glass, corner brackets, neon)
+- **Storage**: MongoDB (`cyberworld_ai` db): `scenarios`, `tenants`, `incidents`
 
-## Architecture
-- **Frontend only** demo — Vite + React + TypeScript + TailwindCSS + Lucide Icons
-- Existing complex backend-connected app was replaced by a fresh demo App.tsx with
-  mocked scenario data faithful to the PDF (nodes, kill-chain, MITRE, XAI, mitigations, roadmap)
-- Fonts: Chakra Petch (display) · IBM Plex Sans (body) · JetBrains Mono (data)
-- Custom CSS: grain overlay, scan grid, neon glows, tactical clip-path buttons, corner brackets, blink/pulse animations
-- Vite config: allowedHosts:true, port 3000, HMR over wss for preview URL
+## Backend Endpoints
+- `GET  /api/health` — status + scenario count
+- `GET  /api/tenants` — 3 tenants (ACME, Orbital, Fortis MSSP)
+- `GET  /api/scenarios` — list scenarios
+- `GET  /api/scenarios/{id}` — full scenario (nodes, edges, stages, mitre, xai, mitigations, target pool, log seed)
+- `GET  /api/scenarios/{id}/frame/{frame}` — computed state for that frame
+- `POST /api/simulate` — apply mitigations, return baseline + new_risk + delta
+- `POST /api/incidents` — save incident bundle (server captures snapshot)
+- `GET  /api/incidents?tenant_id=…` — list per tenant
+- `GET  /api/incidents/{id}` — retrieve
 
-## User Personas (from PDF)
+## Scenarios seeded
+1. **Ransomware Ω-7742** — VPN→AD→SMB→PII (13 nodes, 8 stages, 5 mitigations)
+2. **Cloud Credential Heist γ-3311** — IAM abuse→S3 exfil (9 nodes, cloud-heavy)
+3. **Supply Chain Compromise λ-9018** — CI→Registry→K8s prod (8 nodes, supply chain)
+
+## Frontend Features
+- **Multi-tenant selector** in top bar (ACME, Orbital Health, Fortis MSSP)
+- **Multi-scenario selector** in top bar with instant twin re-render
+- **Replay Scrubber** — play/pause/step/speed(0.5×/1×/2×) driving all panels via backend fetches
+- **8 Rooms** — Overview, Twin, Forecast, XAI, MITRE, Simulate, Reports, Settings
+- **What-if Simulation** — mitigation toggles POST to `/api/simulate`, real-time baseline vs mitigated delta
+- **Save Incident** — captures scenario+frame+mitigations+snapshot to Mongo, toast confirmation
+- **Incident export** — downloads JSON bundle to disk
+- **Open incident** — reloads scenario+frame+mitigations from a saved bundle
+- **Live terminal** — server-supplied log tail keyed by frame
+- **Loading + error states** — boot spinner, backend-down banner, toast notifications
+
+## User Personas
 - SOC Analysts · CISO / Risk Officers · Red & Blue Teams · MSSP Providers
 
-## Implemented (2026-01)
-- Sticky top command bar: brand mark, twin-synced chip, model chip, AI confidence, UTC clock, STRATEGY & DEPLOY buttons
-- Left nav rail with 8 sections + operator card
-- Hero band: tagline, description, 3 CTAs (Inspect / Run Forecast / Contain)
-- 4 KPI tiles: threats, forecast confidence, mean lead time, twin nodes
-- Interactive Network Digital Twin SVG canvas (13 nodes, 13 edges) with:
-  - Risk-colored nodes with hover inspector
-  - Animated packet flow dashes (malicious=rose, predicted=violet, normal=cyan)
-  - Pulsing critical-node rings, radar sweep, scan line
-- Attack Forecast rail: 8-stage kill-chain probability bars + predicted next targets
-- MITRE ATT&CK matrix: 8 tactics × 12 techniques with confidence chips
-- Explainable AI panel: 6 SHAP-style feature contributions with directional bars
-- What-if Defense Simulation: 5 toggleable mitigations with live risk delta baseline→after
-- Live event terminal: auto-appending event stream (1.8s cadence), filter chips
-- Commercialization Roadmap: 4 phases from PDF (Prototype→XAI→Autonomous→SOAR)
-- Target Segments grid: 4 user personas from PDF
-- Footer strip with Predict · Explain · Simulate · Defend indicators
-
-## Core Requirements (static)
-- Must feel like a real cybersecurity mission-control app (not "AI slop")
-- Content faithful to CyberWorld AI PDF pitch deck
-- All interactive elements have `data-testid` attributes
-- Dark tactical theme; no purple/violet gradient on white; no generic centered layout
-
 ## Backlog / Next Actions
-- **P1**: Multi-view routing — switch left-nav sections to filter/reshape main canvas
-- **P1**: Attack replay timeline scrubber with phase milestones
-- **P2**: XAI drill-down modal per signal with raw event snippets
-- **P2**: Multi-tenant / MSSP view (tenant switcher in top bar)
-- **P2**: Real backend integration (currently 100% mocked)
-- **P3**: Export incident report PDF with evidence bundle
+- **P1**: Playbook automation — chain mitigation toggles into named playbooks that auto-run on matching forecast patterns
+- **P1**: PDF export (currently JSON only)
+- **P2**: Real WebSocket streaming for frame progression (currently HTTP fetch per frame)
+- **P2**: Real threat intel enrichment on node hover (CVE/IOC/ASN reputation)
+- **P3**: Authentication + RBAC per tenant
+- **P3**: Historical trend charts across saved incidents

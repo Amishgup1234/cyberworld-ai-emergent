@@ -1,143 +1,95 @@
-// Typed fetch client using generated.ts types, with health check and offline fallback logic
-import type {
-  HealthResponse,
-  ScenarioDetail,
-  ScenarioSummary,
-  ForecastResponse,
-  EvaluationMetrics,
-  EngineMetadata,
-} from './generated';
+/**
+ * CyberWorld AI — API client
+ * Talks to /api/* on the same origin (Vite proxies in dev; ingress in prod).
+ */
 
-export type ConnectionMode = 'api' | 'offline' | 'loading';
+const BASE = "/api";
 
-export interface OfflineBundle {
-  scenario: ScenarioDetail;
-  metrics: EvaluationMetrics;
-  metadata: Record<string, unknown>;
-  engine_metadata: EngineMetadata;
-  disclosure: string;
-  claim_limitations: string;
-  generated_at: string;
-}
-
-const HEALTH_TIMEOUT_MS = 2000;
-
-function parseJsonSanitized<T>(text: string): T {
-  const sanitized = text.replace(/\bInfinity\b/g, '1.0').replace(/\b-NaN\b/g, 'null').replace(/\bNaN\b/g, 'null');
-  return JSON.parse(sanitized) as T;
-}
-
-async function getResponseJsonText<T>(res: Response): Promise<T> {
-  // Mock-friendly: handle both real Response with text() and vitest mocks with only json()
-  if (typeof (res as unknown as { text?: unknown }).text === 'function') {
-    const text = await res.text();
-    return parseJsonSanitized<T>(text);
-  }
-  // fallback for test mocks that only implement json()
-  const j = await (res as unknown as { json: () => Promise<unknown> }).json();
-  // j may already be object - but ensure sanitization via stringify/parse for Infinity in object case
-  const txt = JSON.stringify(j);
-  return parseJsonSanitized<T>(txt);
-}
-
-export async function fetchHealth(timeoutMs = HEALTH_TIMEOUT_MS): Promise<HealthResponse | null> {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch('/api/v1/health', { signal: controller.signal });
-    if (!res.ok) return null;
-    const data = await getResponseJsonText<HealthResponse>(res);
-    return data;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(id);
-  }
-}
-
-export async function fetchScenarioList(): Promise<ScenarioSummary[]> {
-  const res = await fetch('/api/v1/scenarios');
-  if (!res.ok) throw new Error(`scenarios list failed ${res.status}`);
-  return getResponseJsonText<ScenarioSummary[]>(res);
-}
-
-export async function fetchScenarioDetail(scenarioId: string): Promise<ScenarioDetail> {
-  const res = await fetch(`/api/v1/scenarios/${encodeURIComponent(scenarioId)}`);
-  if (!res.ok) throw new Error(`scenario detail failed ${res.status}`);
-  return getResponseJsonText<ScenarioDetail>(res);
-}
-
-export async function fetchMetrics(): Promise<EvaluationMetrics> {
-  const res = await fetch('/api/v1/metrics');
-  if (!res.ok) throw new Error(`metrics failed ${res.status}`);
-  return getResponseJsonText<EvaluationMetrics>(res);
-}
-
-export async function fetchForecast(
-  scenarioId: string,
-  frameId: number
-): Promise<ForecastResponse> {
-  const res = await fetch('/api/v1/forecast', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ scenario_id: scenarioId, frame_id: frameId }),
+async function j<T>(url: string, init?: RequestInit): Promise<T> {
+  const r = await fetch(url, {
+    headers: { "Content-Type": "application/json" },
+    ...init,
   });
-  if (!res.ok) throw new Error(`forecast failed ${res.status}`);
-  return getResponseJsonText<ForecastResponse>(res);
+  if (!r.ok) throw new Error(`${r.status} ${r.statusText} @ ${url}`);
+  return (await r.json()) as T;
 }
 
-export async function fetchSimulateIsolate(
-  scenarioId: string,
-  frameId: number,
-  host: string,
-  action: string = 'isolate_host'
-): Promise<import('./generated').SimulationResult> {
-  const res = await fetch('/api/v1/simulate/isolate-host', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ scenario_id: scenarioId, frame_id: frameId, host, action }),
-  });
-  if (!res.ok) {
-    let detail = `simulate failed ${res.status}`;
-    try {
-      const j = await getResponseJsonText<Record<string, unknown>>(res);
-      detail = (j.detail as string) || detail;
-    } catch {
-      // ignore JSON parse error, use default detail
-    }
-    const err = new Error(detail);
-    // attach status for caller checks
-    (err as unknown as Record<string, unknown>).status = res.status;
-    throw err;
-  }
-  return getResponseJsonText<import('./generated').SimulationResult>(res);
-}
+export type ScenarioMeta = { id: string; name: string; summary: string; family: string; frame_count: number };
 
-export async function fetchOfflineBundle(): Promise<OfflineBundle> {
-  const res = await fetch('/offline_bundle.json');
-  if (!res.ok) throw new Error(`offline bundle fetch failed ${res.status}`);
-  const bundle = await getResponseJsonText<OfflineBundle>(res);
-  // offline_bundle.json has scenario at top level under .scenario
-  // Also data/demo/cyberworld_replay.json could be fallback but public/offline_bundle is primary
-  if (!bundle.scenario && (bundle as unknown as Record<string, unknown>).scenario === undefined) {
-    // Try to interpret as ScenarioDetail directly
-    const asScenario = bundle as unknown as ScenarioDetail;
-    if (asScenario.frames) {
-      return {
-        scenario: asScenario as unknown as ScenarioDetail,
-        metrics: (asScenario as unknown as Record<string, unknown>).metrics as EvaluationMetrics || (bundle as unknown as Record<string, unknown>).metrics as EvaluationMetrics,
-        metadata: (asScenario as unknown as Record<string, unknown>).metadata as Record<string, unknown> || {},
-        engine_metadata: (asScenario.engine_metadata as EngineMetadata) || (asScenario as unknown as Record<string, unknown>).engine_metadata as EngineMetadata,
-        disclosure: (asScenario as unknown as Record<string, unknown>).disclosure as string || '',
-        claim_limitations: (asScenario as unknown as Record<string, unknown>).claim_limitations as string || '',
-        generated_at: new Date().toISOString(),
-      };
-    }
-  }
-  return bundle;
-}
+export type Node = {
+  id: string; label: string; kind: string; x: number; y: number;
+  base: string; escalate_at?: number; peak?: string; ip: string; tier: string;
+  risk: string;
+};
+export type Edge = {
+  from: string; to: string; intensity: number;
+  malicious?: boolean; predicted?: boolean; appears_at?: number; visible: boolean;
+};
+export type Stage = { stage: string; color: string; activate_at: number; target: number; prob: number; done: boolean };
+export type Technique = { id: string; name: string; conf: number; active_at: number; active: boolean; current_conf: number };
+export type MitreCol = { tactic: string; techniques: Technique[] };
+export type XaiSignal = { name: string; weight: number; dir: "up" | "down"; context: string; active_at: number; active: boolean };
+export type TargetPred = { host: string; pct: number; eta_min: number; color: string };
+export type LogLine = { at: number; t: string; tag: string; color: string; text: string };
 
-export function isBackendHealthy(health: HealthResponse | null): boolean {
-  if (!health) return false;
-  return health.status === 'ok' && health.engine === 'trained';
-}
+export type Kpis = {
+  active_threat_vectors: number;
+  forecast_confidence: number;
+  lead_time_sec: number;
+  twin_nodes: number;
+  twin_edges: number;
+  critical_nodes: number;
+  warn_nodes: number;
+  twin_fidelity: number;
+};
+
+export type FrameState = {
+  frame: number; frame_count: number; stages_done: number;
+  stages: Stage[]; nodes: Node[]; edges: Edge[]; mitre: MitreCol[];
+  xai: XaiSignal[]; targets: TargetPred[]; logs: LogLine[]; kpis: Kpis;
+  computed_at: string;
+};
+
+export type Mitigation = { id: string; label: string; delta: number; icon: string };
+
+export type ScenarioFull = ScenarioMeta & {
+  nodes: Node[]; edges: Edge[]; stages: Stage[]; mitre: MitreCol[];
+  xai: XaiSignal[]; mitigations: Mitigation[];
+  target_pool: { host: string; peak: number; activate_at: number; eta_base: number; color: string }[];
+  log_seed: { at: number; tag: string; color: string; text: string }[];
+};
+
+export type Tenant = { id: string; name: string; region: string; operator: string; tier: string };
+
+export type SimResult = {
+  frame: number; baseline_risk: number; delta_pct: number; new_risk: number;
+  applied: Mitigation[];
+};
+
+export type Incident = {
+  id: string; scenario_id: string; scenario_name: string;
+  tenant_id: string | null; frame: number; title: string;
+  operator: string | null; notes: string | null;
+  mitigation_ids: string[]; created_at: string;
+  snapshot: {
+    kpis: Kpis; targets: TargetPred[]; stages: Stage[];
+    mitre_active: { tactic: string; id: string; name: string; conf: number }[];
+    xai_active: XaiSignal[]; simulation: SimResult;
+  };
+};
+
+export const api = {
+  health: () => j<{ status: string; scenarios_loaded: number }>(`${BASE}/health`),
+  listScenarios: () => j<ScenarioMeta[]>(`${BASE}/scenarios`),
+  getScenario: (id: string) => j<ScenarioFull>(`${BASE}/scenarios/${encodeURIComponent(id)}`),
+  getFrame: (id: string, frame: number) => j<FrameState>(`${BASE}/scenarios/${encodeURIComponent(id)}/frame/${frame}`),
+  listTenants: () => j<Tenant[]>(`${BASE}/tenants`),
+  simulate: (scenario_id: string, frame: number, mitigation_ids: string[]) =>
+    j<SimResult>(`${BASE}/simulate`, { method: "POST", body: JSON.stringify({ scenario_id, frame, mitigation_ids }) }),
+  createIncident: (payload: {
+    scenario_id: string; tenant_id?: string | null; frame: number; title: string;
+    operator?: string; notes?: string; mitigation_ids: string[];
+  }) => j<Incident>(`${BASE}/incidents`, { method: "POST", body: JSON.stringify(payload) }),
+  listIncidents: (tenant_id?: string) =>
+    j<Incident[]>(`${BASE}/incidents${tenant_id ? `?tenant_id=${encodeURIComponent(tenant_id)}` : ""}`),
+};

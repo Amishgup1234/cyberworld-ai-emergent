@@ -1,136 +1,28 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, AlertTriangle, ArrowRight, Ban, BrainCircuit, ChevronRight, Clock, Cpu, Database,
   Eye, Fingerprint, GitBranch, Globe, Layers, LineChart, Lock, MonitorSmartphone, Network, Radar,
   Radio, ScanEye, Server, ShieldAlert, Signal, Sparkles, Terminal, TrendingUp, Zap,
   Router as RouterIcon, HardDrive, Cloud, User, Fingerprint as FingerprintIcon, Waves,
   ChevronsRight, ShieldOff, CircleDot, Target, FileText, Settings, Play, Pause, RotateCcw,
-  Rewind, FastForward, Binary, ChevronLeft, Download, ShieldCheck, BarChart3,
+  Rewind, FastForward, Binary, ChevronLeft, Download, ShieldCheck, BarChart3, Building2,
+  Loader2, Check, Save,
 } from 'lucide-react';
+import { api } from './api/client';
+import type { FrameState, Incident, Mitigation, ScenarioFull, ScenarioMeta, SimResult, Tenant } from './api/client';
 
 /* =========================================================================
-   TYPES + BASE DATA
+   Helpers
    ========================================================================= */
 
-type NodeKind = 'gateway' | 'server' | 'workstation' | 'cloud' | 'db' | 'identity' | 'iot';
 type Risk = 'safe' | 'watch' | 'warn' | 'critical';
-
-type TwinNode = {
-  id: string; label: string; kind: NodeKind;
-  x: number; y: number; base: Risk;
-  escalateAt?: number; peak?: Risk;
-  ip: string; tier: string;
-};
-type TwinEdge = {
-  from: string; to: string; intensity: number;
-  malicious?: boolean; predicted?: boolean;
-  appearsAt?: number;
-};
-
-const NODES: TwinNode[] = [
-  { id: 'gw-01',   label: 'Perimeter Gateway',  kind: 'gateway',     x: 90,  y: 220, base: 'safe',  escalateAt: 4,  peak: 'watch',    ip: '10.0.0.1',   tier: 'Perimeter' },
-  { id: 'fw-01',   label: 'Next-Gen Firewall',  kind: 'gateway',     x: 200, y: 130, base: 'safe',                                     ip: '10.0.0.2',   tier: 'Perimeter' },
-  { id: 'vpn-01',  label: 'VPN Concentrator',   kind: 'gateway',     x: 200, y: 320, base: 'safe',  escalateAt: 6,  peak: 'warn',     ip: '10.0.0.9',   tier: 'Perimeter' },
-  { id: 'ad-01',   label: 'AD-01 Domain Ctrl',  kind: 'identity',    x: 380, y: 220, base: 'safe',  escalateAt: 10, peak: 'critical', ip: '10.0.10.4',  tier: 'Core Identity' },
-  { id: 'db-01',   label: 'PII Database',       kind: 'db',          x: 560, y: 130, base: 'safe',  escalateAt: 16, peak: 'critical', ip: '10.0.20.12', tier: 'Crown Jewels' },
-  { id: 'db-02',   label: 'Finance Vault',      kind: 'db',          x: 560, y: 310, base: 'safe',  escalateAt: 18, peak: 'warn',     ip: '10.0.20.14', tier: 'Crown Jewels' },
-  { id: 'srv-01',  label: 'File Server SMB',    kind: 'server',      x: 380, y: 380, base: 'safe',  escalateAt: 12, peak: 'warn',     ip: '10.0.30.5',  tier: 'Core' },
-  { id: 'srv-02',  label: 'Mail Exchange',      kind: 'server',      x: 380, y: 60,  base: 'safe',  escalateAt: 5,  peak: 'watch',    ip: '10.0.30.7',  tier: 'Core' },
-  { id: 'cld-01',  label: 'S3 Backup Bucket',   kind: 'cloud',       x: 720, y: 100, base: 'safe',  escalateAt: 22, peak: 'watch',    ip: 'aws-us-1',   tier: 'Cloud' },
-  { id: 'cld-02',  label: 'K8s Prod Cluster',   kind: 'cloud',       x: 720, y: 260, base: 'safe',                                     ip: 'k8s-prod',   tier: 'Cloud' },
-  { id: 'ws-01',   label: 'HR-Laptop-014',      kind: 'workstation', x: 190, y: 460, base: 'safe',                                     ip: '10.0.40.14', tier: 'Workstation' },
-  { id: 'ws-02',   label: 'Dev-Workstation-22', kind: 'workstation', x: 560, y: 460, base: 'safe',  escalateAt: 14, peak: 'warn',     ip: '10.0.40.22', tier: 'Workstation' },
-  { id: 'iot-01',  label: 'HVAC Controller',    kind: 'iot',         x: 720, y: 420, base: 'safe',  escalateAt: 4,  peak: 'watch',    ip: '10.0.90.3',  tier: 'OT/IoT' },
-];
-
-const EDGES: TwinEdge[] = [
-  { from: 'gw-01',  to: 'fw-01',  intensity: 0.9 },
-  { from: 'gw-01',  to: 'vpn-01', intensity: 0.6 },
-  { from: 'fw-01',  to: 'ad-01',  intensity: 0.8 },
-  { from: 'vpn-01', to: 'ad-01',  intensity: 0.7, malicious: true, appearsAt: 6 },
-  { from: 'ad-01',  to: 'db-01',  intensity: 0.9, predicted: true, malicious: true, appearsAt: 16 },
-  { from: 'ad-01',  to: 'db-02',  intensity: 0.5 },
-  { from: 'ad-01',  to: 'srv-01', intensity: 0.75, malicious: true, appearsAt: 10 },
-  { from: 'srv-02', to: 'fw-01',  intensity: 0.4 },
-  { from: 'srv-01', to: 'ws-02',  intensity: 0.55, predicted: true, appearsAt: 14 },
-  { from: 'db-01',  to: 'cld-01', intensity: 0.7, predicted: true, appearsAt: 22 },
-  { from: 'cld-02', to: 'db-02',  intensity: 0.35 },
-  { from: 'ws-01',  to: 'vpn-01', intensity: 0.5 },
-  { from: 'iot-01', to: 'cld-02', intensity: 0.3 },
-];
-
-const STAGES = [
-  { stage: 'Recon',            activateAt: 0,  target: 0.98, color: '#00F0FF' },
-  { stage: 'Initial Access',   activateAt: 3,  target: 0.92, color: '#00F0FF' },
-  { stage: 'Execution',        activateAt: 6,  target: 0.87, color: '#7C6BFF' },
-  { stage: 'Persistence',      activateAt: 10, target: 0.72, color: '#7C6BFF' },
-  { stage: 'Priv Escalation',  activateAt: 14, target: 0.61, color: '#FFAA00' },
-  { stage: 'Lateral Movement', activateAt: 18, target: 0.44, color: '#FFAA00' },
-  { stage: 'Credential Access',activateAt: 22, target: 0.29, color: '#FF2E63' },
-  { stage: 'Exfiltration',     activateAt: 26, target: 0.11, color: '#FF2E63' },
-];
-
-const MITRE_MATRIX = [
-  { tactic: 'Recon',            techniques: [{ id: 'T1595', name: 'Active Scanning',           conf: 0.97, activeAt: 0 }, { id: 'T1592', name: 'Victim Host Info',      conf: 0.71, activeAt: 1 }] },
-  { tactic: 'Initial Access',   techniques: [{ id: 'T1078', name: 'Valid Accounts',            conf: 0.94, activeAt: 3 }, { id: 'T1566', name: 'Phishing',              conf: 0.55, activeAt: 4 }] },
-  { tactic: 'Execution',        techniques: [{ id: 'T1059', name: 'Command & Scripting',       conf: 0.88, activeAt: 6 }] },
-  { tactic: 'Persistence',      techniques: [{ id: 'T1136', name: 'Create Account',            conf: 0.66, activeAt: 10 }, { id: 'T1053', name: 'Scheduled Task',         conf: 0.42, activeAt: 11 }] },
-  { tactic: 'Priv Escalation',  techniques: [{ id: 'T1068', name: 'Exploit Vuln (CVE-2026-1189)', conf: 0.61, activeAt: 14 }] },
-  { tactic: 'Credential Access',techniques: [{ id: 'T1558', name: 'Kerberoasting',             conf: 0.58, activeAt: 22 }, { id: 'T1003', name: 'OS Credential Dumping',  conf: 0.31, activeAt: 23 }] },
-  { tactic: 'Lateral Movement', techniques: [{ id: 'T1021', name: 'Remote Services (SMB)',     conf: 0.47, activeAt: 18 }] },
-  { tactic: 'Exfiltration',     techniques: [{ id: 'T1041', name: 'C2 Channel Exfil',          conf: 0.12, activeAt: 26 }] },
-];
-
-const XAI_SIGNALS_BASE = [
-  { name: 'SMB traffic anomaly (srv-01)',          weight: 0.34, dir: 'up',   context: 'Volume 6.4× baseline for last 480s', activeAt: 10 },
-  { name: 'Kerberos service ticket bursts (ad-01)',weight: 0.28, dir: 'up',   context: '11 SPN requests / 60s window',        activeAt: 12 },
-  { name: 'VPN session from novel ASN',            weight: 0.17, dir: 'up',   context: 'AS205100 first-seen in 90d window',   activeAt: 6 },
-  { name: 'Dormant service account activated',     weight: 0.11, dir: 'up',   context: 'svc_backup_legacy — no auth in 214d', activeAt: 14 },
-  { name: 'Reduced beaconing entropy (out-01)',    weight: 0.07, dir: 'down', context: 'Model expects broader jitter',        activeAt: 4 },
-  { name: 'CVE-2026-1189 patch missing',           weight: 0.03, dir: 'up',   context: 'Endpoint SCCM confirms unpatched',    activeAt: 14 },
-];
-
-const MITIGATIONS = [
-  { id: 'isolate-ad-01',    label: 'Isolate AD-01 domain controller',       delta: -47, icon: ShieldOff },
-  { id: 'block-smb',        label: 'Block SMB (port 445) at core switch',   delta: -22, icon: Ban },
-  { id: 'mfa-vpn',          label: 'Enforce MFA re-auth on VPN sessions',   delta: -9,  icon: Lock },
-  { id: 'patch-cve',        label: 'Apply patch CVE-2026-1189',             delta: -18, icon: Binary },
-  { id: 'kill-svc-account', label: 'Disable svc_backup_legacy account',     delta: -6,  icon: Fingerprint },
-];
-
 const RISK_COLOR: Record<Risk, string> = { safe:'#7CFFB0', watch:'#00F0FF', warn:'#FFAA00', critical:'#FF2E63' };
-const KIND_ICON: Record<NodeKind, typeof Server> = { gateway: RouterIcon, server: Server, workstation: MonitorSmartphone, cloud: Cloud, db: Database, identity: User, iot: HardDrive };
-
-const FRAME_COUNT = 30;
-
-/* =========================================================================
-   FRAME-DERIVED HELPERS
-   ========================================================================= */
-
-function stageProbAt(activateAt: number, target: number, frame: number) {
-  if (frame < activateAt) return 0;
-  const ramp = Math.min(1, (frame - activateAt) / 4);
-  return target * ramp;
-}
-function stageDoneAt(activateAt: number, frame: number) { return frame > activateAt + 4; }
-
-function riskAtFrame(n: TwinNode, frame: number): Risk {
-  if (!n.escalateAt || !n.peak) return n.base;
-  if (frame < n.escalateAt) return n.base === 'safe' ? 'safe' : n.base;
-  if (frame < n.escalateAt + 4) {
-    const ladder: Risk[] = ['safe','watch','warn','critical'];
-    const from = ladder.indexOf(n.base);
-    const to = ladder.indexOf(n.peak);
-    return ladder[Math.min(to, from + 1)];
-  }
-  if (frame < n.escalateAt + 8) {
-    const ladder: Risk[] = ['safe','watch','warn','critical'];
-    const to = ladder.indexOf(n.peak);
-    return ladder[Math.max(0, to - 1)];
-  }
-  return n.peak;
-}
-function edgeVisibleAt(e: TwinEdge, frame: number) { return (e.appearsAt ?? -1) <= frame; }
+const KIND_ICON: Record<string, typeof Server> = {
+  gateway: RouterIcon, server: Server, workstation: MonitorSmartphone, cloud: Cloud, db: Database, identity: User, iot: HardDrive,
+};
+const MITIGATION_ICONS: Record<string, typeof Server> = {
+  ShieldOff, Ban, Lock, Binary, Fingerprint,
+};
 
 function useClock() {
   const [now, setNow] = useState<Date>(new Date());
@@ -138,8 +30,13 @@ function useClock() {
   return now;
 }
 
+function fmtLead(sec: number) {
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+}
+
 /* =========================================================================
-   TOP + NAV
+   TOP BAR
    ========================================================================= */
 
 function BrandMark() {
@@ -159,40 +56,101 @@ function BrandMark() {
   );
 }
 
-function TopBar({ conf }: { conf: number }) {
+function Dropdown<T extends { id: string }>({ value, options, label, icon: Icon, onChange, render, testid }: {
+  value: string | null; options: T[]; label: string; icon: typeof Server;
+  onChange: (id: string) => void; render: (t: T) => { title: string; sub?: string }; testid: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const cur = options.find(o => o.id === value);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h);
+  }, []);
+  return (
+    <div className="relative" ref={ref}>
+      <button onClick={() => setOpen(v => !v)} data-testid={testid}
+        className="btn-tactical !py-1.5 !px-3 flex items-center gap-2 min-w-[180px]">
+        <Icon className="w-3.5 h-3.5"/>
+        <span className="text-left flex-1 min-w-0">
+          <span className="block font-mono text-[9px] tracking-[0.24em] text-cyan-300/60 uppercase">{label}</span>
+          <span className="block text-[11.5px] text-white/90 truncate normal-case tracking-normal">{cur ? render(cur).title : '—'}</span>
+        </span>
+        <ChevronRight className={`w-3.5 h-3.5 ${open ? 'rotate-90' : ''}`}/>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-2 w-[320px] max-w-[90vw] glass rounded-sm p-1 z-50 shadow-2xl">
+          {options.map(o => {
+            const r = render(o);
+            const active = o.id === value;
+            return (
+              <button key={o.id} onClick={() => { onChange(o.id); setOpen(false); }}
+                data-testid={`${testid}-opt-${o.id}`}
+                className={`w-full text-left px-3 py-2 rounded-sm ${active ? 'bg-cyan-400/10 text-white' : 'text-white/75 hover:bg-cyan-400/5 hover:text-white'}`}>
+                <div className="flex items-center justify-between">
+                  <span className="text-[12.5px] font-medium">{r.title}</span>
+                  {active && <Check className="w-3.5 h-3.5 text-cyan-300"/>}
+                </div>
+                {r.sub && <div className="font-mono text-[10px] text-white/45 mt-0.5">{r.sub}</div>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TopBar({ conf, scenarios, scenarioId, onScenario, tenants, tenantId, onTenant, onSave, saving }: {
+  conf: number; scenarios: ScenarioMeta[]; scenarioId: string | null; onScenario: (id: string) => void;
+  tenants: Tenant[]; tenantId: string | null; onTenant: (id: string) => void;
+  onSave: () => void; saving: boolean;
+}) {
   const now = useClock();
   const utc = now.toISOString().slice(11, 19);
   return (
-    <div className="sticky top-0 z-40 h-[60px] border-b border-cyan-400/10 bg-[#05070C]/85 backdrop-blur-xl" data-testid="top-bar">
-      <div className="h-full px-5 flex items-center justify-between">
-        <div className="flex items-center gap-8">
+    <div className="sticky top-0 z-40 h-[64px] border-b border-cyan-400/10 bg-[#05070C]/85 backdrop-blur-xl" data-testid="top-bar">
+      <div className="h-full px-5 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-6 min-w-0">
           <BrandMark/>
-          <div className="hidden md:flex items-center gap-2">
+          <div className="hidden xl:flex items-center gap-2">
             <span className="chip"><CircleDot className="w-3 h-3 text-lime-300 blink"/>TWIN SYNCED</span>
             <span className="chip"><Cpu className="w-3 h-3 text-cyan-300"/>NODES 12,480</span>
             <span className="chip"><GitBranch className="w-3 h-3 text-violet-300"/>MODEL tw-v3.4.1</span>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="hidden lg:flex items-center gap-2 pr-3 border-r border-white/5">
+        <div className="flex items-center gap-2 shrink-0">
+          <Dropdown testid="tenant-dropdown" value={tenantId} options={tenants} label="TENANT" icon={Building2}
+            onChange={onTenant} render={(t) => ({ title: t.name, sub: `${t.region} · ${t.tier} · ${t.operator}` })}/>
+          <Dropdown testid="scenario-dropdown" value={scenarioId} options={scenarios} label="SCENARIO" icon={Radar}
+            onChange={onScenario} render={(s) => ({ title: s.name, sub: s.family })}/>
+          <div className="hidden lg:flex items-center gap-2 px-3 border-l border-white/5">
             <TrendingUp className="w-3.5 h-3.5 text-lime-300"/>
-            <span className="font-mono text-[11px] text-white/90">AI CONF <span className="text-lime-300 font-bold">{conf.toFixed(1)}%</span></span>
+            <span className="font-mono text-[11px] text-white/90">CONF <span className="text-lime-300 font-bold">{conf.toFixed(1)}%</span></span>
           </div>
-          <div className="flex items-center gap-2 pr-3 border-r border-white/5">
+          <div className="hidden md:flex items-center gap-2 pr-2">
             <Clock className="w-3.5 h-3.5 text-cyan-300"/>
             <span className="font-mono text-[11px] text-white/80">{utc} UTC</span>
           </div>
-          <button className="btn-tactical" data-testid="btn-strategy-deck"><span className="flex items-center gap-1.5"><FileText className="w-3.5 h-3.5"/>STRATEGY</span></button>
-          <button className="btn-tactical primary" data-testid="btn-deploy"><span className="flex items-center gap-1.5"><Zap className="w-3.5 h-3.5"/>DEPLOY</span></button>
+          <button className="btn-tactical primary" onClick={onSave} disabled={saving} data-testid="btn-save-incident">
+            <span className="flex items-center gap-1.5">
+              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin"/> : <Save className="w-3.5 h-3.5"/>}
+              SAVE INCIDENT
+            </span>
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
+/* =========================================================================
+   NAV RAIL
+   ========================================================================= */
+
 type NavId = 'overview' | 'twin' | 'forecast' | 'xai' | 'mitre' | 'simulate' | 'reports' | 'settings';
 
-function NavRail({ current, setCurrent }: { current: NavId; setCurrent: (s: NavId) => void }) {
+function NavRail({ current, setCurrent, tenant, operator }: { current: NavId; setCurrent: (s: NavId) => void; tenant?: Tenant; operator?: string; }) {
   const items: { id: NavId; label: string; icon: typeof Server }[] = [
     { id: 'overview', label: 'Command Overview', icon: Radar },
     { id: 'twin', label: 'Digital Twin', icon: Network },
@@ -204,7 +162,7 @@ function NavRail({ current, setCurrent }: { current: NavId; setCurrent: (s: NavI
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
   return (
-    <nav className="w-[220px] shrink-0 hidden lg:flex flex-col border-r border-cyan-400/10 bg-[#070B18]/70 backdrop-blur-md sticky top-[60px] self-start" style={{ height: 'calc(100vh - 60px)' }} data-testid="nav-rail">
+    <nav className="w-[220px] shrink-0 hidden lg:flex flex-col border-r border-cyan-400/10 bg-[#070B18]/70 backdrop-blur-md sticky top-[64px] self-start" style={{ height: 'calc(100vh - 64px)' }} data-testid="nav-rail">
       <div className="p-4 border-b border-white/5">
         <div className="text-[10px] font-mono tracking-[0.24em] text-cyan-300/50">STATION 01 · SOC-EAST</div>
         <div className="mt-2 flex items-center gap-2 text-[11px] text-white/70"><Signal className="w-3 h-3 text-lime-300"/> Uplink stable · 4.2ms</div>
@@ -225,10 +183,13 @@ function NavRail({ current, setCurrent }: { current: NavId; setCurrent: (s: NavI
       </div>
       <div className="p-3 border-t border-white/5">
         <div className="glass rounded-sm p-3">
-          <div className="font-mono text-[9.5px] tracking-[0.24em] text-cyan-300/60 mb-2">OPERATOR</div>
+          <div className="font-mono text-[9.5px] tracking-[0.24em] text-cyan-300/60 mb-2">TENANT · OPERATOR</div>
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-sm bg-lime-300/20 border border-lime-300/40 flex items-center justify-center"><FingerprintIcon className="w-3.5 h-3.5 text-lime-300"/></div>
-            <div className="leading-tight"><div className="text-[12px] text-white/90">A. Kowalski</div><div className="text-[10px] text-white/40">Tier-2 · Blue Team</div></div>
+            <div className="leading-tight min-w-0">
+              <div className="text-[12px] text-white/90 truncate">{operator || '—'}</div>
+              <div className="text-[10px] text-white/40 truncate">{tenant ? `${tenant.name}` : '—'}</div>
+            </div>
           </div>
         </div>
       </div>
@@ -241,31 +202,26 @@ function NavRail({ current, setCurrent }: { current: NavId; setCurrent: (s: NavI
    ========================================================================= */
 
 const MILESTONES = [
-  { frame: 0,  id: 'baseline',   label: 'Baseline',        color: '#7CFFB0' },
-  { frame: 6,  id: 'emerging',   label: 'Emerging',        color: '#00F0FF' },
-  { frame: 10, id: 'warning',    label: 'Early Warning',   color: '#FFAA00' },
-  { frame: 16, id: 'critical',   label: 'Critical Path',   color: '#FF2E63' },
-  { frame: 22, id: 'exfil',      label: 'Exfil Risk',      color: '#FF2E63' },
+  { framePct: 0.00, id: 'baseline', label: 'Baseline',      color: '#7CFFB0' },
+  { framePct: 0.20, id: 'emerging', label: 'Emerging',      color: '#00F0FF' },
+  { framePct: 0.35, id: 'warning',  label: 'Early Warning', color: '#FFAA00' },
+  { framePct: 0.55, id: 'critical', label: 'Critical Path', color: '#FF2E63' },
+  { framePct: 0.75, id: 'exfil',    label: 'Exfil Risk',    color: '#FF2E63' },
 ];
 
-function ReplayScrubber({
-  frame, setFrame, playing, setPlaying, speed, setSpeed,
-}: {
-  frame: number; setFrame: (f: number) => void;
-  playing: boolean; setPlaying: (p: boolean) => void;
-  speed: number; setSpeed: (s: number) => void;
+function ReplayScrubber({ frame, setFrame, playing, setPlaying, speed, setSpeed, frameCount }: {
+  frame: number; setFrame: (f: number) => void; playing: boolean; setPlaying: (p: boolean) => void;
+  speed: number; setSpeed: (s: number) => void; frameCount: number;
 }) {
   useEffect(() => {
     if (!playing) return;
     const ms = speed === 0.5 ? 1600 : speed === 2 ? 400 : 800;
     const id = setInterval(() => {
-      setFrame(Math.min(FRAME_COUNT - 1, frame + 1) === frame ? 0 : Math.min(FRAME_COUNT - 1, frame + 1));
+      setFrame(Math.min(frameCount - 1, frame + 1));
     }, ms);
     return () => clearInterval(id);
-  }, [playing, frame, speed, setFrame]);
-
-  const pct = (frame / (FRAME_COUNT - 1)) * 100;
-
+  }, [playing, frame, speed, setFrame, frameCount]);
+  const pct = frameCount > 1 ? (frame / (frameCount - 1)) * 100 : 0;
   return (
     <div className="corners relative glass rounded-sm px-4 py-3 mb-5" data-testid="replay-scrubber">
       <div className="cbr"></div>
@@ -276,9 +232,8 @@ function ReplayScrubber({
           <button className="btn-tactical primary !py-1.5 !px-3" onClick={() => setPlaying(!playing)} data-testid="scrub-play">
             {playing ? <Pause className="w-3.5 h-3.5"/> : <Play className="w-3.5 h-3.5"/>}
           </button>
-          <button className="btn-tactical !py-1.5 !px-2" onClick={() => setFrame(Math.min(FRAME_COUNT - 1, frame + 1))} data-testid="scrub-forward"><FastForward className="w-3.5 h-3.5"/></button>
+          <button className="btn-tactical !py-1.5 !px-2" onClick={() => setFrame(Math.min(frameCount - 1, frame + 1))} data-testid="scrub-forward"><FastForward className="w-3.5 h-3.5"/></button>
         </div>
-
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between mb-1.5">
             <div className="flex items-center gap-2">
@@ -287,38 +242,29 @@ function ReplayScrubber({
             </div>
             <div className="flex items-center gap-3 text-[10.5px] font-mono">
               <span className="text-white/50">Frame</span>
-              <span className="text-cyan-300 font-bold">{String(frame).padStart(2, '0')} / {FRAME_COUNT - 1}</span>
+              <span className="text-cyan-300 font-bold">{String(frame).padStart(2, '0')} / {frameCount - 1}</span>
               <span className="text-white/50">T+{(frame * 12).toString().padStart(3, '0')}s</span>
             </div>
           </div>
           <div className="relative">
-            {/* track */}
             <div className="h-2 bg-white/5 rounded-full relative">
               {MILESTONES.map(m => (
-                <div key={m.id} className="absolute top-1/2 -translate-y-1/2 flex flex-col items-center" style={{ left: `${(m.frame / (FRAME_COUNT - 1)) * 100}%`, transform: 'translate(-50%, -50%)' }} title={m.label}>
+                <div key={m.id} className="absolute top-1/2 -translate-y-1/2 flex flex-col items-center" style={{ left: `${m.framePct * 100}%`, transform: 'translate(-50%, -50%)' }} title={m.label}>
                   <span className="w-1.5 h-1.5 rounded-full" style={{ background: m.color, boxShadow: `0 0 8px ${m.color}` }}/>
                 </div>
               ))}
               <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, #00F0FF, #B6FF3D)' }}/>
-              <input
-                type="range" min={0} max={FRAME_COUNT - 1} step={1} value={frame}
-                onChange={(e) => setFrame(parseInt(e.target.value))}
-                className="absolute inset-0 w-full opacity-0 cursor-pointer"
-                data-testid="scrub-slider"
-              />
+              <input type="range" min={0} max={frameCount - 1} step={1} value={frame} onChange={(e) => setFrame(parseInt(e.target.value))}
+                className="absolute inset-0 w-full opacity-0 cursor-pointer" data-testid="scrub-slider"/>
               <div className="absolute top-1/2 w-3.5 h-3.5 rounded-full bg-white -translate-y-1/2 -translate-x-1/2 pointer-events-none" style={{ left: `${pct}%`, boxShadow: '0 0 0 3px rgba(0,240,255,0.35), 0 0 20px rgba(0,240,255,0.6)' }}/>
             </div>
-            {/* milestone labels */}
             <div className="relative h-4 mt-1">
               {MILESTONES.map(m => (
-                <span key={m.id} className="absolute font-mono text-[9px] tracking-wider uppercase text-white/55" style={{ left: `${(m.frame / (FRAME_COUNT - 1)) * 100}%`, transform: 'translateX(-50%)', color: frame >= m.frame ? m.color : undefined }}>
-                  {m.label}
-                </span>
+                <span key={m.id} className="absolute font-mono text-[9px] tracking-wider uppercase text-white/55" style={{ left: `${m.framePct * 100}%`, transform: 'translateX(-50%)', color: pct/100 >= m.framePct ? m.color : undefined }}>{m.label}</span>
               ))}
             </div>
           </div>
         </div>
-
         <div className="flex items-center gap-1">
           {[0.5, 1, 2].map(s => (
             <button key={s} onClick={() => setSpeed(s)} data-testid={`scrub-speed-${s}`}
@@ -359,11 +305,11 @@ function KpiTile({ icon: Icon, label, value, unit, tone, trend, testid }:
 }
 
 /* =========================================================================
-   TWIN CANVAS (frame aware)
+   TWIN CANVAS
    ========================================================================= */
 
-function TwinCanvas({ frame, hovered, setHovered, compact = false }: { frame: number; hovered: string | null; setHovered: (id: string | null) => void; compact?: boolean }) {
-  const nodeById = useMemo(() => Object.fromEntries(NODES.map(n => [n.id, n])), []);
+function TwinCanvas({ state, hovered, setHovered, compact = false }: { state: FrameState; hovered: string | null; setHovered: (id: string | null) => void; compact?: boolean; }) {
+  const nodeById = useMemo(() => Object.fromEntries(state.nodes.map(n => [n.id, n])), [state.nodes]);
   return (
     <div className="corners relative glass rounded-sm overflow-hidden" data-testid="twin-canvas">
       <div className="cbr"></div>
@@ -371,7 +317,7 @@ function TwinCanvas({ frame, hovered, setHovered, compact = false }: { frame: nu
         <div className="flex items-center gap-3">
           <Network className="w-4 h-4 text-cyan-300"/>
           <h3 className="font-display text-[13px] tracking-wider text-white/90">NETWORK DIGITAL TWIN</h3>
-          <span className="chip"><CircleDot className="w-2.5 h-2.5 text-lime-300 blink"/>LIVE · F{String(frame).padStart(2,'0')}</span>
+          <span className="chip"><CircleDot className="w-2.5 h-2.5 text-lime-300 blink"/>LIVE · F{String(state.frame).padStart(2,'0')}</span>
         </div>
         <div className="flex items-center gap-1.5">
           {['All','Critical','Targeted','Isolated'].map((f, i) => (
@@ -383,41 +329,28 @@ function TwinCanvas({ frame, hovered, setHovered, compact = false }: { frame: nu
       <div className={`relative bg-grid overflow-hidden ${compact ? 'h-[520px]' : 'h-[640px]'}`}>
         <div className="absolute inset-x-0 h-24 pointer-events-none scan-line" style={{ background: 'linear-gradient(180deg, transparent, rgba(0,240,255,0.10), transparent)' }}/>
         <div className="absolute -right-24 -top-24 w-80 h-80 rounded-full border border-cyan-400/10 rotate-slow" style={{ background: 'conic-gradient(from 0deg, rgba(0,240,255,0.16), transparent 30%)' }}/>
-
         <svg viewBox="0 0 820 520" preserveAspectRatio="xMidYMid meet" className="absolute inset-0 w-full h-full" data-testid="twin-svg">
           <defs>
-            <linearGradient id="grad-cyan" x1="0" x2="1">
-              <stop offset="0%" stopColor="#00F0FF" stopOpacity="0.05"/>
-              <stop offset="50%" stopColor="#00F0FF" stopOpacity="0.75"/>
-              <stop offset="100%" stopColor="#00F0FF" stopOpacity="0.05"/>
-            </linearGradient>
-            <linearGradient id="grad-rose" x1="0" x2="1">
-              <stop offset="0%" stopColor="#FF2E63" stopOpacity="0.05"/>
-              <stop offset="50%" stopColor="#FF2E63" stopOpacity="0.85"/>
-              <stop offset="100%" stopColor="#FF2E63" stopOpacity="0.05"/>
-            </linearGradient>
+            <linearGradient id="grad-cyan" x1="0" x2="1"><stop offset="0%" stopColor="#00F0FF" stopOpacity="0.05"/><stop offset="50%" stopColor="#00F0FF" stopOpacity="0.75"/><stop offset="100%" stopColor="#00F0FF" stopOpacity="0.05"/></linearGradient>
+            <linearGradient id="grad-rose" x1="0" x2="1"><stop offset="0%" stopColor="#FF2E63" stopOpacity="0.05"/><stop offset="50%" stopColor="#FF2E63" stopOpacity="0.85"/><stop offset="100%" stopColor="#FF2E63" stopOpacity="0.05"/></linearGradient>
           </defs>
-
-          {EDGES.map((e, i) => {
-            const visible = edgeVisibleAt(e, frame);
-            const a = nodeById[e.from]; const b = nodeById[e.to];
-            if (!a || !b) return null;
+          {state.edges.map((e, i) => {
+            const a = nodeById[e.from]; const b = nodeById[e.to]; if (!a || !b) return null;
             const grad = e.malicious ? 'url(#grad-rose)' : 'url(#grad-cyan)';
             const stroke = e.malicious ? '#FF2E63' : e.predicted ? '#7C6BFF' : '#00F0FF';
-            const opacity = visible ? 0.35 + e.intensity * 0.5 : 0.06;
+            const opacity = e.visible ? 0.35 + e.intensity * 0.5 : 0.06;
             return (
               <g key={i}>
                 <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={grad} strokeWidth={1 + e.intensity * 2} opacity={opacity}/>
-                {(e.malicious || e.predicted) && visible && (
+                {(e.malicious || e.predicted) && e.visible && (
                   <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={stroke} strokeWidth={1.4} strokeDasharray="6 6" className="flow-dash" opacity={0.9}/>
                 )}
               </g>
             );
           })}
-
-          {NODES.map(n => {
-            const r = riskAtFrame(n, frame);
-            const c = RISK_COLOR[r];
+          {state.nodes.map(n => {
+            const r = n.risk as Risk;
+            const c = RISK_COLOR[r] || RISK_COLOR.safe;
             const isHover = hovered === n.id;
             const rad = isHover ? 15 : 12;
             return (
@@ -432,13 +365,12 @@ function TwinCanvas({ frame, hovered, setHovered, compact = false }: { frame: nu
             );
           })}
         </svg>
-
         {hovered && nodeById[hovered] && (
           <div className="absolute top-3 left-3 glass rounded-sm p-3 w-[260px]" data-testid="twin-hover-inspector">
             {(() => {
               const n = nodeById[hovered];
-              const Icon = KIND_ICON[n.kind];
-              const r = riskAtFrame(n, frame);
+              const Icon = KIND_ICON[n.kind] || Server;
+              const r = n.risk as Risk;
               return (
                 <>
                   <div className="flex items-center justify-between">
@@ -453,7 +385,6 @@ function TwinCanvas({ frame, hovered, setHovered, compact = false }: { frame: nu
             })()}
           </div>
         )}
-
         <div className="absolute bottom-3 left-3 glass rounded-sm px-3 py-2 flex items-center gap-4 flex-wrap">
           {(['safe','watch','warn','critical'] as Risk[]).map(r => (
             <div key={r} className="flex items-center gap-1.5 font-mono text-[10px] text-white/60 uppercase"><span className="w-2 h-2 rounded-full" style={{ background: RISK_COLOR[r] }}/>{r}</div>
@@ -468,31 +399,11 @@ function TwinCanvas({ frame, hovered, setHovered, compact = false }: { frame: nu
 }
 
 /* =========================================================================
-   FORECAST RAIL / KILLCHAIN
+   FORECAST RAIL
    ========================================================================= */
 
-function useForecastAt(frame: number) {
-  return useMemo(() => STAGES.map(s => ({
-    ...s,
-    prob: stageProbAt(s.activateAt, s.target, frame),
-    done: stageDoneAt(s.activateAt, frame),
-    eta: (() => {
-      const remaining = Math.max(0, (s.activateAt + 4) - frame) * 12;
-      return remaining > 0 ? `${Math.floor(remaining/60).toString().padStart(2,'0')}:${(remaining%60).toString().padStart(2,'0')}` : null;
-    })(),
-  })), [frame]);
-}
-
-function ForecastRail({ frame }: { frame: number }) {
-  const stages = useForecastAt(frame);
-  const targets = useMemo(() => [
-    { host: 'db-01 (PII Database)',   pct: stageProbAt(16, 0.78, frame), eta: `${Math.max(0, 22 - frame)} min`, color: '#FF2E63' },
-    { host: 'srv-01 (SMB Fileserver)',pct: stageProbAt(10, 0.61, frame), eta: `${Math.max(0, 14 - frame)} min`, color: '#FFAA00' },
-    { host: 'cld-01 (S3 Backup)',     pct: stageProbAt(22, 0.34, frame), eta: `${Math.max(0, 38 - frame)} min`, color: '#7C6BFF' },
-  ], [frame]);
-  const lead = Math.max(0, (22 - frame)) * 60;
-  const leadStr = `${Math.floor(lead / 60).toString().padStart(2,'0')}:${(lead % 60).toString().padStart(2,'0')}`;
-
+function ForecastRail({ state }: { state: FrameState }) {
+  const leadStr = fmtLead(state.kpis.lead_time_sec);
   return (
     <div className="corners relative glass rounded-sm p-4" data-testid="forecast-rail">
       <div className="cbr"></div>
@@ -500,9 +411,8 @@ function ForecastRail({ frame }: { frame: number }) {
         <div className="flex items-center gap-2"><TrendingUp className="w-4 h-4 text-violet-300"/><h3 className="font-display text-[13px] tracking-wider text-white/90">ATTACK FORECAST</h3></div>
         <span className="chip" style={{ color: '#FFAA00', borderColor: 'rgba(255,170,0,0.35)' }}><AlertTriangle className="w-2.5 h-2.5"/>LEAD {leadStr}</span>
       </div>
-
       <div className="space-y-1.5">
-        {stages.map((s) => (
+        {state.stages.map((s) => (
           <div key={s.stage} data-testid={`kc-${s.stage.replace(/\s/g, '-').toLowerCase()}`}>
             <div className="flex items-center justify-between mb-0.5">
               <div className="flex items-center gap-1.5">
@@ -515,17 +425,15 @@ function ForecastRail({ frame }: { frame: number }) {
             <div className="h-[6px] bg-white/[0.04] rounded-sm overflow-hidden border border-white/5">
               <div className="h-full" style={{ width: `${s.prob * 100}%`, background: `linear-gradient(90deg, transparent, ${s.color})`, transition: 'width 300ms cubic-bezier(0.16,1,0.3,1)' }}/>
             </div>
-            {s.eta && <div className="mt-0.5 font-mono text-[9.5px] text-white/40">ETA {s.eta} · {(s.prob * 100).toFixed(0)}% conf</div>}
           </div>
         ))}
       </div>
-
       <div className="mt-4 pt-3 border-t border-white/5">
         <div className="font-mono text-[10px] tracking-[0.22em] text-white/45 uppercase mb-2">Predicted Next Targets</div>
-        {targets.map((t) => (
+        {state.targets.map((t) => (
           <div key={t.host} className="flex items-center justify-between py-1.5" data-testid={`target-${t.host.split(' ')[0]}`}>
             <div className="flex items-center gap-2"><Target className="w-3 h-3" style={{ color: t.color }}/><span className="font-mono text-[11px] text-white/85">{t.host}</span></div>
-            <div className="flex items-center gap-2"><span className="font-mono text-[11px] font-bold" style={{ color: t.color, opacity: t.pct > 0.05 ? 1 : 0.3 }}>{(t.pct * 100).toFixed(0)}%</span><span className="font-mono text-[9.5px] text-white/40">{t.eta}</span></div>
+            <div className="flex items-center gap-2"><span className="font-mono text-[11px] font-bold" style={{ color: t.color, opacity: t.pct > 0.05 ? 1 : 0.3 }}>{(t.pct * 100).toFixed(0)}%</span><span className="font-mono text-[9.5px] text-white/40">{t.eta_min} min</span></div>
           </div>
         ))}
       </div>
@@ -537,37 +445,34 @@ function ForecastRail({ frame }: { frame: number }) {
    MITRE
    ========================================================================= */
 
-function MitreMatrix({ frame }: { frame: number }) {
+function MitreMatrix({ state }: { state: FrameState }) {
+  const totalTechs = state.mitre.reduce((s, c) => s + c.techniques.length, 0);
   return (
     <div className="corners relative glass rounded-sm p-4" data-testid="mitre-panel">
       <div className="cbr"></div>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2"><ScanEye className="w-4 h-4 text-cyan-300"/><h3 className="font-display text-[13px] tracking-wider text-white/90">MITRE ATT&CK MAPPING</h3></div>
-        <span className="chip">v13.1 · 8 tactics · 12 techniques</span>
+        <span className="chip">v13.1 · {state.mitre.length} tactics · {totalTechs} techniques</span>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        {MITRE_MATRIX.map((col) => (
+        {state.mitre.map((col) => (
           <div key={col.tactic} className="rounded-sm border border-white/5 bg-white/[0.015] p-2">
             <div className="font-mono text-[9.5px] tracking-[0.16em] text-cyan-300/70 uppercase mb-2">{col.tactic}</div>
             <div className="space-y-1.5">
-              {col.techniques.map((t) => {
-                const active = frame >= t.activeAt;
-                const conf = active ? t.conf : 0;
-                return (
-                  <div key={t.id} data-testid={`mitre-${t.id}`} className="rounded-sm border p-1.5"
-                    style={{
-                      borderColor: !active ? 'rgba(255,255,255,0.06)' : t.conf > 0.75 ? 'rgba(255,46,99,0.5)' : t.conf > 0.5 ? 'rgba(255,170,0,0.4)' : 'rgba(0,240,255,0.25)',
-                      background: !active ? 'rgba(255,255,255,0.008)' : t.conf > 0.75 ? 'rgba(255,46,99,0.06)' : t.conf > 0.5 ? 'rgba(255,170,0,0.05)' : 'rgba(0,240,255,0.04)',
-                      opacity: active ? 1 : 0.4,
-                    }}>
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-[9.5px] text-white/75">{t.id}</span>
-                      <span className="font-mono text-[9.5px] font-bold" style={{ color: !active ? '#4A536B' : t.conf > 0.75 ? '#FF6B8B' : t.conf > 0.5 ? '#FFC66B' : '#7DE6F3' }}>{(conf * 100).toFixed(0)}%</span>
-                    </div>
-                    <div className="text-[11px] text-white/85 leading-tight">{t.name}</div>
+              {col.techniques.map((t) => (
+                <div key={t.id} data-testid={`mitre-${t.id}`} className="rounded-sm border p-1.5"
+                  style={{
+                    borderColor: !t.active ? 'rgba(255,255,255,0.06)' : t.conf > 0.75 ? 'rgba(255,46,99,0.5)' : t.conf > 0.5 ? 'rgba(255,170,0,0.4)' : 'rgba(0,240,255,0.25)',
+                    background: !t.active ? 'rgba(255,255,255,0.008)' : t.conf > 0.75 ? 'rgba(255,46,99,0.06)' : t.conf > 0.5 ? 'rgba(255,170,0,0.05)' : 'rgba(0,240,255,0.04)',
+                    opacity: t.active ? 1 : 0.4,
+                  }}>
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-[9.5px] text-white/75">{t.id}</span>
+                    <span className="font-mono text-[9.5px] font-bold" style={{ color: !t.active ? '#4A536B' : t.conf > 0.75 ? '#FF6B8B' : t.conf > 0.5 ? '#FFC66B' : '#7DE6F3' }}>{(t.current_conf * 100).toFixed(0)}%</span>
                   </div>
-                );
-              })}
+                  <div className="text-[11px] text-white/85 leading-tight">{t.name}</div>
+                </div>
+              ))}
             </div>
           </div>
         ))}
@@ -580,10 +485,10 @@ function MitreMatrix({ frame }: { frame: number }) {
    XAI
    ========================================================================= */
 
-function XaiPanel({ frame }: { frame: number }) {
-  const active = XAI_SIGNALS_BASE.filter(s => frame >= s.activeAt);
-  const displayed = active.length ? active : XAI_SIGNALS_BASE.slice(0, 1).map(s => ({ ...s, weight: 0.01 }));
-  const max = Math.max(...displayed.map(s => s.weight));
+function XaiPanel({ state }: { state: FrameState }) {
+  const active = state.xai.filter(s => s.active);
+  const displayed = active.length ? active : state.xai.slice(0, 1).map(s => ({ ...s, weight: 0.01 }));
+  const max = Math.max(...displayed.map(s => s.weight), 0.01);
   return (
     <div className="corners relative glass rounded-sm p-4" data-testid="xai-panel">
       <div className="cbr"></div>
@@ -591,7 +496,7 @@ function XaiPanel({ frame }: { frame: number }) {
         <div className="flex items-center gap-2"><BrainCircuit className="w-4 h-4 text-lime-300"/><h3 className="font-display text-[13px] tracking-wider text-white/90">EXPLAINABLE AI · EVIDENCE</h3></div>
         <span className="chip"><Eye className="w-2.5 h-2.5"/>SHAP · 80 FEAT</span>
       </div>
-      <p className="text-[11.5px] text-white/55 mb-3 leading-relaxed">Contribution of behavioral signals at frame F{String(frame).padStart(2,'0')}. Copy evidence to attach to SOC incident.</p>
+      <p className="text-[11.5px] text-white/55 mb-3 leading-relaxed">Contribution of behavioral signals at frame F{String(state.frame).padStart(2,'0')}. Copy evidence to attach to SOC incident.</p>
       <div className="space-y-2">
         {displayed.map((s, i) => {
           const w = (s.weight / max) * 100;
@@ -621,11 +526,14 @@ function XaiPanel({ frame }: { frame: number }) {
    SIMULATION
    ========================================================================= */
 
-function SimulationPanel({ frame }: { frame: number }) {
-  const [active, setActive] = useState<Record<string, boolean>>({ 'isolate-ad-01': true });
-  const delta = MITIGATIONS.filter(m => active[m.id]).reduce((s, m) => s + m.delta, 0);
-  const baseline = stageProbAt(16, 0.78, frame);
-  const newRisk = Math.max(0.02, baseline + delta / 100);
+function SimulationPanel({ scenario, frame, activeMitigations, setActiveMitigations, sim }: {
+  scenario: ScenarioFull; frame: number; activeMitigations: Record<string, boolean>;
+  setActiveMitigations: (u: (prev: Record<string, boolean>) => Record<string, boolean>) => void;
+  sim: SimResult | null;
+}) {
+  const baseline = sim?.baseline_risk ?? 0;
+  const newRisk = sim?.new_risk ?? baseline;
+  const delta = sim?.delta_pct ?? 0;
   return (
     <div className="corners relative glass rounded-sm p-4" data-testid="sim-panel">
       <div className="cbr"></div>
@@ -637,7 +545,7 @@ function SimulationPanel({ frame }: { frame: number }) {
         <div className="rounded-sm border border-white/5 p-3">
           <div className="font-mono text-[9.5px] tracking-[0.2em] text-white/45 uppercase">Baseline Risk</div>
           <div className="mt-1 font-display text-[26px] font-bold text-rose-300">{(baseline * 100).toFixed(0)}<span className="text-[13px] text-white/40">%</span></div>
-          <div className="font-mono text-[10px] text-white/40">db-01 · lead {Math.max(0, 22 - frame)} min</div>
+          <div className="font-mono text-[10px] text-white/40">peak target · server-computed</div>
         </div>
         <div className="rounded-sm border p-3 relative overflow-hidden" style={{ borderColor: newRisk < 0.35 ? 'rgba(182,255,61,0.45)' : 'rgba(255,170,0,0.4)' }}>
           <div className="font-mono text-[9.5px] tracking-[0.2em] text-white/45 uppercase">After Mitigation</div>
@@ -646,10 +554,10 @@ function SimulationPanel({ frame }: { frame: number }) {
         </div>
       </div>
       <div className="space-y-1.5">
-        {MITIGATIONS.map(m => {
-          const on = !!active[m.id]; const Icon = m.icon;
+        {scenario.mitigations.map((m: Mitigation) => {
+          const on = !!activeMitigations[m.id]; const Icon = MITIGATION_ICONS[m.icon] || ShieldOff;
           return (
-            <button key={m.id} data-testid={`sim-toggle-${m.id}`} onClick={() => setActive(a => ({ ...a, [m.id]: !on }))}
+            <button key={m.id} data-testid={`sim-toggle-${m.id}`} onClick={() => setActiveMitigations(a => ({ ...a, [m.id]: !on }))}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-sm border text-left ${on ? 'bg-lime-300/8 border-lime-300/40' : 'border-white/8 hover:border-cyan-400/25 hover:bg-cyan-400/5'}`}>
               <div className="flex items-center gap-2.5 min-w-0">
                 <div className={`w-6 h-6 shrink-0 rounded-sm flex items-center justify-center ${on ? 'bg-lime-300/15 text-lime-300' : 'bg-white/5 text-white/60'}`}><Icon className="w-3.5 h-3.5"/></div>
@@ -671,38 +579,13 @@ function SimulationPanel({ frame }: { frame: number }) {
 }
 
 /* =========================================================================
-   TERMINAL — event lines tied to frame progression
+   TERMINAL
    ========================================================================= */
 
-function LiveTerminal({ frame }: { frame: number }) {
+function LiveTerminal({ state }: { state: FrameState }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const lines = useMemo(() => {
-    const seed = [
-      { at: 0,  tag: 'MODEL',    color: 'cyan',   text: 'Temporal model checkpoint tw-v3.4.1 loaded (80 features)' },
-      { at: 1,  tag: 'PREDICT',  color: 'lime',   text: 'Twin sync 12,480 nodes · 42,110 edges committed' },
-      { at: 3,  tag: 'ANOMALY',  color: 'amber',  text: 'Novel ASN AS205100 first-seen on vpn-01 tunnel' },
-      { at: 5,  tag: 'MITRE',    color: 'violet', text: 'T1078 Valid Accounts observed on vpn-01' },
-      { at: 6,  tag: 'FORECAST', color: 'cyan',   text: 'Path prob vpn-01 -> ad-01 = 0.42 (rising)' },
-      { at: 8,  tag: 'ANOMALY',  color: 'amber',  text: 'Kerberos SPN request burst on ad-01 (11/60s)' },
-      { at: 10, tag: 'MITRE',    color: 'violet', text: 'T1059 Command & Scripting matched on ad-01' },
-      { at: 11, tag: 'ANOMALY',  color: 'amber',  text: 'SMB burst detected srv-01 <- ad-01 (6.4x baseline)' },
-      { at: 12, tag: 'FORECAST', color: 'cyan',   text: 'Attack path predicted ad-01 -> srv-01 -> db-01 (p=0.61)' },
-      { at: 14, tag: 'DEFEND',   color: 'lime',   text: 'Recommendation: isolate ad-01 (est. delta -47%)' },
-      { at: 15, tag: 'ANOMALY',  color: 'amber',  text: 'svc_backup_legacy activated after 214d dormant window' },
-      { at: 16, tag: 'CRITICAL', color: 'rose',   text: 'db-01 (Crown Jewel) elevated to CRITICAL — lead 6 min' },
-      { at: 18, tag: 'ATTACK',   color: 'rose',   text: 'Lateral pivot ad-01 -> srv-01 -> ws-02 confirmed' },
-      { at: 20, tag: 'MITRE',    color: 'violet', text: 'T1021 Remote Services (SMB) mapped conf=0.47' },
-      { at: 22, tag: 'MITRE',    color: 'violet', text: 'T1558 Kerberoasting mapped conf=0.58 on ad-01' },
-      { at: 24, tag: 'CRITICAL', color: 'rose',   text: 'Predicted exfil path db-01 -> cld-01 (S3) p=0.34' },
-      { at: 26, tag: 'ATTACK',   color: 'rose',   text: 'C2 beaconing signature match on outbound cld-01' },
-      { at: 28, tag: 'DEFEND',   color: 'lime',   text: 'Auto-suggested playbook: isolate + patch + block-445' },
-    ];
-    return seed.filter(l => l.at <= frame).map(l => ({ ...l, t: (l.at * 0.12).toFixed(3) }));
-  }, [frame]);
-
-  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }); }, [lines]);
+  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }); }, [state.logs.length]);
   const colorMap: Record<string, string> = { cyan:'#00F0FF', lime:'#B6FF3D', amber:'#FFAA00', rose:'#FF2E63', violet:'#7C6BFF' };
-
   return (
     <div className="corners relative rounded-sm border border-cyan-400/15 bg-[#070A14]" data-testid="terminal">
       <div className="cbr"></div>
@@ -710,7 +593,7 @@ function LiveTerminal({ frame }: { frame: number }) {
         <div className="flex items-center gap-2">
           <Terminal className="w-3.5 h-3.5 text-lime-300"/>
           <span className="font-display text-[12px] tracking-widest text-white/85">LIVE EVENT STREAM</span>
-          <span className="chip"><CircleDot className="w-2 h-2 text-lime-300 blink"/>tail -f twin.jsonl @ F{String(frame).padStart(2,'0')}</span>
+          <span className="chip"><CircleDot className="w-2 h-2 text-lime-300 blink"/>tail -f twin.jsonl @ F{String(state.frame).padStart(2,'0')}</span>
         </div>
         <div className="flex items-center gap-1.5">
           {['ALL','ANOMALY','ATTACK','FORECAST','DEFEND'].map((f, i) => (
@@ -719,8 +602,8 @@ function LiveTerminal({ frame }: { frame: number }) {
         </div>
       </div>
       <div ref={scrollRef} className="h-[240px] overflow-y-auto p-3 font-mono text-[11.5px] leading-relaxed">
-        {lines.length === 0 && <div className="text-white/30">// awaiting activity...</div>}
-        {lines.map((l, i) => (
+        {state.logs.length === 0 && <div className="text-white/30">// awaiting activity...</div>}
+        {state.logs.map((l, i) => (
           <div key={i} className="flex gap-3 rise-in">
             <span className="text-white/30 shrink-0">{l.t}</span>
             <span className="shrink-0 font-bold" style={{ color: colorMap[l.color] }}>[{l.tag.padEnd(8)}]</span>
@@ -766,10 +649,10 @@ function RoadmapStrip() {
 
 function TargetSegments() {
   const segs = [
-    { icon: Radar,    label: 'SOC Analysts',        detail: 'Prioritise evolving threats · lead time' },
-    { icon: Layers,   label: 'CISO / Risk Officers',detail: 'Board-ready predictive posture reports' },
-    { icon: Zap,      label: 'Red & Blue Teams',    detail: 'Replay attacks · train on twin fidelity' },
-    { icon: Globe,    label: 'MSSP Providers',      detail: 'Multi-tenant, prioritised triage' },
+    { icon: Radar,  label: 'SOC Analysts',        detail: 'Prioritise evolving threats · lead time' },
+    { icon: Layers, label: 'CISO / Risk Officers',detail: 'Board-ready predictive posture reports' },
+    { icon: Zap,    label: 'Red & Blue Teams',    detail: 'Replay attacks · train on twin fidelity' },
+    { icon: Globe,  label: 'MSSP Providers',      detail: 'Multi-tenant, prioritised triage' },
   ];
   return (
     <div className="corners relative glass rounded-sm p-4" data-testid="segments-panel">
@@ -792,33 +675,31 @@ function TargetSegments() {
 }
 
 /* =========================================================================
-   SECTION HEADER
+   SECTION HEAD
    ========================================================================= */
 
-function SectionHead({ nav, setNav, frame }: { nav: NavId; setNav: (n: NavId) => void; frame: number }) {
+function SectionHead({ nav, setNav, frame, scenarioName }: { nav: NavId; setNav: (n: NavId) => void; frame: number; scenarioName?: string; }) {
   const meta: Record<NavId, { title: string; sub: string; icon: typeof Server; tone: string }> = {
-    overview: { title: 'Command Overview',   sub: 'Full situational picture across the predictive stack', icon: Radar,        tone: '#00F0FF' },
+    overview: { title: 'Command Overview',   sub: 'Full situational picture across the predictive stack', icon: Radar, tone: '#00F0FF' },
     twin:     { title: 'Digital Twin',       sub: 'Continuously synchronised graph of hosts, flows and risk', icon: Network, tone: '#00F0FF' },
     forecast: { title: 'Attack Forecast',    sub: 'Kill-chain probability trajectory across the MITRE lifecycle', icon: TrendingUp, tone: '#7C6BFF' },
     xai:      { title: 'Explainable AI',     sub: 'Behavioural evidence and feature contributions behind each prediction', icon: BrainCircuit, tone: '#B6FF3D' },
-    mitre:    { title: 'MITRE ATT&CK',       sub: 'Observed & predicted techniques mapped to v13.1', icon: ScanEye,     tone: '#00F0FF' },
+    mitre:    { title: 'MITRE ATT&CK',       sub: 'Observed & predicted techniques mapped to v13.1', icon: ScanEye, tone: '#00F0FF' },
     simulate: { title: 'What-if Simulate',   sub: 'Test mitigations virtually before touching production', icon: Sparkles, tone: '#7C6BFF' },
-    reports:  { title: 'Reports',            sub: 'Board-ready posture reports and incident bundles', icon: FileText,    tone: '#FFAA00' },
-    settings: { title: 'Settings',           sub: 'Sensors, integrations, and model preferences', icon: Settings,        tone: '#FFAA00' },
+    reports:  { title: 'Incident Reports',   sub: 'Saved bundles ready for SOC handoff and board readout', icon: FileText, tone: '#FFAA00' },
+    settings: { title: 'Settings',           sub: 'Sensors, integrations, and model preferences', icon: Settings, tone: '#FFAA00' },
   };
-  const m = meta[nav];
-  const Icon = m.icon;
+  const m = meta[nav]; const Icon = m.icon;
   const order: NavId[] = ['overview','twin','forecast','xai','mitre','simulate','reports','settings'];
   const idx = order.indexOf(nav);
   return (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-3 rise-in" data-testid="section-head">
       <div>
         <div className="flex items-center gap-2 font-mono text-[10.5px] tracking-[0.3em] text-cyan-300/70 uppercase">
-          <Radio className="w-3 h-3 blink text-lime-300"/> Predictive Command Centre · Session ω-7742 · F{String(frame).padStart(2,'0')}
+          <Radio className="w-3 h-3 blink text-lime-300"/> {scenarioName || 'Predictive Command Centre'} · F{String(frame).padStart(2,'0')}
         </div>
         <h1 className="mt-2 font-display text-[30px] lg:text-[38px] leading-[1.05] font-bold tracking-tight text-white flex items-center gap-3">
-          <Icon className="w-8 h-8" style={{ color: m.tone }}/>
-          {m.title}
+          <Icon className="w-8 h-8" style={{ color: m.tone }}/>{m.title}
         </h1>
         <p className="mt-2 max-w-[640px] text-[13px] text-white/55 leading-relaxed">{m.sub}</p>
       </div>
@@ -831,207 +712,155 @@ function SectionHead({ nav, setNav, frame }: { nav: NavId; setNav: (n: NavId) =>
 }
 
 /* =========================================================================
-   SECTION ROOMS
+   ROOMS
    ========================================================================= */
 
-function KpiRow({ frame }: { frame: number }) {
-  const stages = useForecastAt(frame);
-  const activeThreats = Math.min(3, Math.floor(frame / 8));
-  const conf = 90 + Math.min(6, frame * 0.3);
-  const lead = Math.max(0, (22 - frame)) * 60;
-  const leadStr = `${Math.floor(lead / 60).toString().padStart(2,'0')}:${(lead % 60).toString().padStart(2,'0')}`;
+function KpiRow({ state }: { state: FrameState }) {
+  const leadStr = fmtLead(state.kpis.lead_time_sec);
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5" data-testid="kpi-row">
-      <KpiTile icon={ShieldAlert} label="Active Threat Vectors"  value={String(activeThreats)}       tone="rose"   trend={`↑ ${activeThreats} · last 15 min`} testid="kpi-threats"/>
-      <KpiTile icon={LineChart}   label="Forecast Confidence"    value={conf.toFixed(1)}             unit="%" tone="lime"   trend="tw-v3.4.1 · 80 features" testid="kpi-confidence"/>
-      <KpiTile icon={Clock}       label="Mean Lead Time"         value={leadStr}                     tone="cyan"   trend="Δ vs SIEM +8:42"         testid="kpi-leadtime"/>
-      <KpiTile icon={Network}     label="Twin Nodes Synced"      value="12,480"                       tone="violet" trend={`${stages.filter(s => s.done).length}/8 stages observed`} testid="kpi-nodes"/>
+      <KpiTile icon={ShieldAlert} label="Active Threat Vectors"  value={String(state.kpis.active_threat_vectors)} tone="rose"   trend={`↑ ${state.kpis.active_threat_vectors} · last 15 min`} testid="kpi-threats"/>
+      <KpiTile icon={LineChart}   label="Forecast Confidence"    value={state.kpis.forecast_confidence.toFixed(1)} unit="%" tone="lime"   trend="tw-v3.4.1 · 80 features" testid="kpi-confidence"/>
+      <KpiTile icon={Clock}       label="Mean Lead Time"         value={leadStr} tone="cyan"   trend="Δ vs SIEM +8:42" testid="kpi-leadtime"/>
+      <KpiTile icon={Network}     label="Twin Nodes Synced"      value={state.kpis.twin_nodes.toLocaleString()} tone="violet" trend={`${state.stages_done}/${state.stages.length} stages observed`} testid="kpi-nodes"/>
     </div>
   );
 }
 
-function OverviewRoom({ frame, hovered, setHovered }: { frame: number; hovered: string | null; setHovered: (s: string | null) => void }) {
+function OverviewRoom({ state, scenario, hovered, setHovered, activeMitigations, setActiveMitigations, sim }: {
+  state: FrameState; scenario: ScenarioFull; hovered: string | null; setHovered: (s: string | null) => void;
+  activeMitigations: Record<string, boolean>; setActiveMitigations: (u: (p: Record<string, boolean>) => Record<string, boolean>) => void; sim: SimResult | null;
+}) {
   return (
     <>
-      <KpiRow frame={frame}/>
+      <KpiRow state={state}/>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 mb-5">
-        <div className="xl:col-span-2 min-w-0"><TwinCanvas frame={frame} hovered={hovered} setHovered={setHovered}/></div>
-        <div className="min-w-0"><ForecastRail frame={frame}/></div>
+        <div className="xl:col-span-2 min-w-0"><TwinCanvas state={state} hovered={hovered} setHovered={setHovered}/></div>
+        <div className="min-w-0"><ForecastRail state={state}/></div>
       </div>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 mb-5">
-        <div className="xl:col-span-2 min-w-0"><MitreMatrix frame={frame}/></div>
-        <div className="min-w-0"><XaiPanel frame={frame}/></div>
+        <div className="xl:col-span-2 min-w-0"><MitreMatrix state={state}/></div>
+        <div className="min-w-0"><XaiPanel state={state}/></div>
       </div>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 mb-5">
-        <div className="xl:col-span-2 min-w-0"><SimulationPanel frame={frame}/></div>
+        <div className="xl:col-span-2 min-w-0"><SimulationPanel scenario={scenario} frame={state.frame} activeMitigations={activeMitigations} setActiveMitigations={setActiveMitigations} sim={sim}/></div>
         <div className="min-w-0"><TargetSegments/></div>
       </div>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-        <div className="xl:col-span-2 min-w-0"><LiveTerminal frame={frame}/></div>
+        <div className="xl:col-span-2 min-w-0"><LiveTerminal state={state}/></div>
         <div className="min-w-0"><RoadmapStrip/></div>
       </div>
     </>
   );
 }
 
-function TwinRoom({ frame, hovered, setHovered }: { frame: number; hovered: string | null; setHovered: (s: string | null) => void }) {
-  const criticals = NODES.filter(n => riskAtFrame(n, frame) === 'critical').length;
-  const warns = NODES.filter(n => riskAtFrame(n, frame) === 'warn').length;
+function TwinRoom({ state, hovered, setHovered }: { state: FrameState; hovered: string | null; setHovered: (s: string | null) => void }) {
   return (
     <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-        <KpiTile icon={Network}     label="Nodes Tracked"  value="12,480" tone="cyan"   trend="42,110 edges" testid="kpi-nodes-twin"/>
-        <KpiTile icon={ShieldAlert} label="Critical Nodes" value={String(criticals)} tone="rose" trend="Crown jewels at risk" testid="kpi-critical-nodes"/>
-        <KpiTile icon={AlertTriangle} label="Warn Nodes"   value={String(warns)}     tone="amber" trend="Elevated observation" testid="kpi-warn-nodes"/>
-        <KpiTile icon={ShieldCheck} label="Twin Fidelity"  value="99.4" unit="%"     tone="lime"  trend="drift < 0.02 rmse" testid="kpi-fidelity"/>
+        <KpiTile icon={Network}       label="Nodes Tracked"  value={state.kpis.twin_nodes.toLocaleString()} tone="cyan"   trend={`${state.kpis.twin_edges.toLocaleString()} edges`} testid="kpi-nodes-twin"/>
+        <KpiTile icon={ShieldAlert}   label="Critical Nodes" value={String(state.kpis.critical_nodes)}      tone="rose"   trend="Crown jewels at risk" testid="kpi-critical-nodes"/>
+        <KpiTile icon={AlertTriangle} label="Warn Nodes"     value={String(state.kpis.warn_nodes)}          tone="amber"  trend="Elevated observation" testid="kpi-warn-nodes"/>
+        <KpiTile icon={ShieldCheck}   label="Twin Fidelity"  value={state.kpis.twin_fidelity.toFixed(1)}    unit="%" tone="lime" trend="drift < 0.02 rmse" testid="kpi-fidelity"/>
       </div>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-        <div className="xl:col-span-2 min-w-0"><TwinCanvas frame={frame} hovered={hovered} setHovered={setHovered}/></div>
+        <div className="xl:col-span-2 min-w-0"><TwinCanvas state={state} hovered={hovered} setHovered={setHovered}/></div>
         <div className="min-w-0 flex flex-col gap-5">
           <div className="corners relative glass rounded-sm p-4" data-testid="tier-breakdown">
             <div className="cbr"></div>
             <div className="flex items-center gap-2 mb-3"><Layers className="w-4 h-4 text-cyan-300"/><h3 className="font-display text-[13px] tracking-wider text-white/90">TIER BREAKDOWN</h3></div>
-            {Array.from(new Set(NODES.map(n => n.tier))).map(tier => {
-              const list = NODES.filter(n => n.tier === tier);
+            {Array.from(new Set(state.nodes.map(n => n.tier))).map(tier => {
+              const list = state.nodes.filter(n => n.tier === tier);
               return (
                 <div key={tier} className="py-2 border-b border-white/5 last:border-b-0">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-[10.5px] tracking-wider text-white/60 uppercase">{tier}</span>
-                    <span className="font-mono text-[10.5px] text-cyan-300">{list.length}</span>
-                  </div>
-                  <div className="mt-1 flex gap-1">
-                    {list.map(n => (<span key={n.id} className="h-1.5 flex-1 rounded-sm" style={{ background: RISK_COLOR[riskAtFrame(n, frame)] }}/>))}
-                  </div>
+                  <div className="flex items-center justify-between"><span className="font-mono text-[10.5px] tracking-wider text-white/60 uppercase">{tier}</span><span className="font-mono text-[10.5px] text-cyan-300">{list.length}</span></div>
+                  <div className="mt-1 flex gap-1">{list.map(n => (<span key={n.id} className="h-1.5 flex-1 rounded-sm" style={{ background: RISK_COLOR[n.risk as Risk] || RISK_COLOR.safe }}/>))}</div>
                 </div>
               );
             })}
           </div>
-          <LiveTerminal frame={frame}/>
+          <LiveTerminal state={state}/>
         </div>
       </div>
     </>
   );
 }
 
-function ForecastRoom({ frame }: { frame: number }) {
-  const stages = useForecastAt(frame);
+function ForecastRoom({ state }: { state: FrameState }) {
   return (
     <>
-      <KpiRow frame={frame}/>
+      <KpiRow state={state}/>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 mb-5">
         <div className="xl:col-span-2 corners relative glass rounded-sm p-4" data-testid="killchain-timeline">
           <div className="cbr"></div>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2"><BarChart3 className="w-4 h-4 text-violet-300"/><h3 className="font-display text-[13px] tracking-wider text-white/90">KILL-CHAIN PROBABILITY TRAJECTORY</h3></div>
-            <span className="chip">Frame F{String(frame).padStart(2,'0')} · {FRAME_COUNT} total</span>
-          </div>
+          <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2"><BarChart3 className="w-4 h-4 text-violet-300"/><h3 className="font-display text-[13px] tracking-wider text-white/90">KILL-CHAIN PROBABILITY TRAJECTORY</h3></div><span className="chip">Frame F{String(state.frame).padStart(2,'0')} · {state.frame_count} total</span></div>
           <div className="space-y-3">
-            {stages.map(s => (
+            {state.stages.map(s => (
               <div key={s.stage} className="grid grid-cols-[140px_1fr_60px] gap-3 items-center">
                 <div className="font-mono text-[11px] text-white/80">{s.stage}</div>
                 <div className="h-3 bg-white/[0.04] rounded-sm relative overflow-hidden border border-white/5">
-                  {/* full ramp indication */}
-                  <div className="absolute inset-y-0 rounded-sm" style={{ left: `${(s.activateAt / (FRAME_COUNT - 1)) * 100}%`, width: `${(4 / (FRAME_COUNT - 1)) * 100}%`, background: `${s.color}20` }}/>
+                  <div className="absolute inset-y-0 rounded-sm" style={{ left: `${(s.activate_at / (state.frame_count - 1)) * 100}%`, width: `${(4 / (state.frame_count - 1)) * 100}%`, background: `${s.color}20` }}/>
                   <div className="absolute inset-y-0 left-0" style={{ width: `${s.prob * 100}%`, background: `linear-gradient(90deg, transparent, ${s.color})`, transition: 'width 300ms cubic-bezier(0.16,1,0.3,1)' }}/>
-                  {/* frame marker */}
-                  <div className="absolute top-0 bottom-0 w-[2px] bg-white" style={{ left: `${(frame / (FRAME_COUNT - 1)) * 100}%`, opacity: 0.7 }}/>
+                  <div className="absolute top-0 bottom-0 w-[2px] bg-white" style={{ left: `${(state.frame / (state.frame_count - 1)) * 100}%`, opacity: 0.7 }}/>
                 </div>
                 <div className="font-mono text-[11px] font-bold text-right" style={{ color: s.color }}>{(s.prob * 100).toFixed(0)}%</div>
               </div>
             ))}
           </div>
         </div>
-        <div className="min-w-0"><ForecastRail frame={frame}/></div>
+        <div className="min-w-0"><ForecastRail state={state}/></div>
       </div>
-      <LiveTerminal frame={frame}/>
+      <LiveTerminal state={state}/>
     </>
   );
 }
 
-function XaiRoom({ frame }: { frame: number }) {
+function XaiRoom({ state }: { state: FrameState }) {
+  const strongestTarget = state.targets[0]?.host || 'target';
+  const eta = state.targets[0]?.eta_min ?? 0;
   return (
     <>
-      <KpiRow frame={frame}/>
+      <KpiRow state={state}/>
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 mb-5">
-        <XaiPanel frame={frame}/>
+        <XaiPanel state={state}/>
         <div className="corners relative glass rounded-sm p-4" data-testid="reasoning-panel">
           <div className="cbr"></div>
           <div className="flex items-center gap-2 mb-3"><BrainCircuit className="w-4 h-4 text-lime-300"/><h3 className="font-display text-[13px] tracking-wider text-white/90">AI REASONING NARRATIVE</h3></div>
           <div className="space-y-3 text-[12.5px] text-white/75 leading-relaxed">
-            <p>At <span className="font-mono text-cyan-300">F{String(frame).padStart(2,'0')}</span>, temporal model <span className="font-mono text-cyan-300">tw-v3.4.1</span> observed a shift in behaviour on the identity tier.</p>
-            <p className="pl-3 border-l-2 border-lime-300/40">Primary contributor: <span className="text-white">SMB volume from ad-01 to srv-01</span> at 6.4× baseline. This coincides with elevated Kerberos SPN requests suggesting service ticket enumeration.</p>
-            <p className="pl-3 border-l-2 border-amber-300/40">Secondary contributor: a <span className="text-white">novel ASN</span> on the vpn-01 tunnel matches a first-seen window, corroborated by activation of a dormant service account.</p>
-            <p className="pl-3 border-l-2 border-rose-300/40">Model projects an attack path via <span className="text-white">ad-01 → srv-01 → db-01</span> with predicted lead time of <span className="font-mono text-rose-300">{Math.max(0, 22 - frame)} min</span>.</p>
+            <p>At <span className="font-mono text-cyan-300">F{String(state.frame).padStart(2,'0')}</span>, temporal model <span className="font-mono text-cyan-300">tw-v3.4.1</span> reports {state.xai.filter(s => s.active).length} active behavioural signals.</p>
+            {state.xai.filter(s => s.active).slice(0, 3).map((s, i) => (
+              <p key={i} className="pl-3 border-l-2" style={{ borderColor: i === 0 ? 'rgba(182,255,61,0.4)' : i === 1 ? 'rgba(255,170,0,0.4)' : 'rgba(255,46,99,0.4)' }}>
+                {i === 0 ? 'Primary' : i === 1 ? 'Secondary' : 'Tertiary'} contributor: <span className="text-white">{s.name}</span>. {s.context}.
+              </p>
+            ))}
+            <p className="pt-2 border-t border-white/5">Model projects escalation toward <span className="text-white">{strongestTarget}</span> with predicted lead time of <span className="font-mono text-rose-300">{eta} min</span>.</p>
           </div>
         </div>
       </div>
-      <LiveTerminal frame={frame}/>
+      <LiveTerminal state={state}/>
     </>
   );
 }
 
-function MitreRoom({ frame }: { frame: number }) {
-  const flat = MITRE_MATRIX.flatMap(c => c.techniques.map(t => ({ tactic: c.tactic, ...t })));
+function MitreRoom({ state }: { state: FrameState }) {
+  const flat = state.mitre.flatMap(c => c.techniques.map(t => ({ tactic: c.tactic, ...t })));
   return (
     <>
-      <KpiRow frame={frame}/>
-      <MitreMatrix frame={frame}/>
+      <KpiRow state={state}/>
+      <MitreMatrix state={state}/>
       <div className="corners relative glass rounded-sm p-4 mt-5" data-testid="technique-list">
         <div className="cbr"></div>
         <div className="flex items-center gap-2 mb-3"><ScanEye className="w-4 h-4 text-cyan-300"/><h3 className="font-display text-[13px] tracking-wider text-white/90">TECHNIQUES OBSERVED / PREDICTED</h3></div>
         <div className="grid grid-cols-[70px_140px_1fr_80px_100px] font-mono text-[9.5px] tracking-[0.16em] uppercase text-white/45 border-b border-white/5 pb-2 mb-1">
           <span>ID</span><span>Tactic</span><span>Technique</span><span>Conf</span><span>Status</span>
         </div>
-        {flat.map(t => {
-          const active = frame >= t.activeAt;
-          return (
-            <div key={t.id} className="grid grid-cols-[70px_140px_1fr_80px_100px] py-1.5 border-b border-white/5 last:border-b-0 items-center" style={{ opacity: active ? 1 : 0.4 }}>
-              <span className="font-mono text-[11px] text-white/85">{t.id}</span>
-              <span className="font-mono text-[10.5px] text-cyan-300/80">{t.tactic}</span>
-              <span className="text-[12px] text-white/90">{t.name}</span>
-              <span className="font-mono text-[11px] font-bold" style={{ color: active ? (t.conf > 0.75 ? '#FF6B8B' : t.conf > 0.5 ? '#FFC66B' : '#7DE6F3') : '#4A536B' }}>{(active ? t.conf * 100 : 0).toFixed(0)}%</span>
-              <span className="font-mono text-[10px] tracking-wider uppercase" style={{ color: active ? '#B6FF3D' : '#4A536B' }}>{active ? 'OBSERVED' : 'AWAITING'}</span>
-            </div>
-          );
-        })}
-      </div>
-    </>
-  );
-}
-
-function SimulateRoom({ frame, hovered, setHovered }: { frame: number; hovered: string | null; setHovered: (s: string | null) => void }) {
-  return (
-    <>
-      <KpiRow frame={frame}/>
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 mb-5">
-        <SimulationPanel frame={frame}/>
-        <div className="min-w-0"><TwinCanvas frame={frame} hovered={hovered} setHovered={setHovered} compact/></div>
-      </div>
-      <LiveTerminal frame={frame}/>
-    </>
-  );
-}
-
-function ReportsRoom({ frame }: { frame: number }) {
-  const items = [
-    { name: 'Weekly Posture Report — CyberWorld AI',       date: '2026-01-08', pages: 12, kind: 'PDF' },
-    { name: 'Incident Bundle · ω-7742 (in progress)',      date: '2026-01-09', pages: 8,  kind: 'ZIP' },
-    { name: 'MITRE Coverage Snapshot v13.1',               date: '2026-01-05', pages: 4,  kind: 'PDF' },
-    { name: 'Executive Dashboard — Board Readout',         date: '2026-01-01', pages: 3,  kind: 'PDF' },
-  ];
-  return (
-    <>
-      <KpiRow frame={frame}/>
-      <div className="corners relative glass rounded-sm p-4 mb-5" data-testid="reports-list">
-        <div className="cbr"></div>
-        <div className="flex items-center gap-2 mb-3"><FileText className="w-4 h-4 text-amber-300"/><h3 className="font-display text-[13px] tracking-wider text-white/90">GENERATED REPORTS</h3></div>
-        {items.map((it, i) => (
-          <div key={i} className="flex items-center justify-between py-2.5 border-b border-white/5 last:border-b-0">
-            <div>
-              <div className="text-[13px] text-white/90">{it.name}</div>
-              <div className="font-mono text-[10.5px] text-white/40 mt-0.5">{it.date} · {it.pages} pages · {it.kind}</div>
-            </div>
-            <button className="btn-tactical !py-1.5"><span className="flex items-center gap-1.5"><Download className="w-3.5 h-3.5"/>EXPORT</span></button>
+        {flat.map(t => (
+          <div key={t.id} className="grid grid-cols-[70px_140px_1fr_80px_100px] py-1.5 border-b border-white/5 last:border-b-0 items-center" style={{ opacity: t.active ? 1 : 0.4 }}>
+            <span className="font-mono text-[11px] text-white/85">{t.id}</span>
+            <span className="font-mono text-[10.5px] text-cyan-300/80">{t.tactic}</span>
+            <span className="text-[12px] text-white/90">{t.name}</span>
+            <span className="font-mono text-[11px] font-bold" style={{ color: t.active ? (t.conf > 0.75 ? '#FF6B8B' : t.conf > 0.5 ? '#FFC66B' : '#7DE6F3') : '#4A536B' }}>{(t.current_conf * 100).toFixed(0)}%</span>
+            <span className="font-mono text-[10px] tracking-wider uppercase" style={{ color: t.active ? '#B6FF3D' : '#4A536B' }}>{t.active ? 'OBSERVED' : 'AWAITING'}</span>
           </div>
         ))}
       </div>
@@ -1039,10 +868,70 @@ function ReportsRoom({ frame }: { frame: number }) {
   );
 }
 
-function SettingsRoom({ frame }: { frame: number }) {
+function SimulateRoom({ state, scenario, hovered, setHovered, activeMitigations, setActiveMitigations, sim }: {
+  state: FrameState; scenario: ScenarioFull; hovered: string | null; setHovered: (s: string | null) => void;
+  activeMitigations: Record<string, boolean>; setActiveMitigations: (u: (p: Record<string, boolean>) => Record<string, boolean>) => void; sim: SimResult | null;
+}) {
   return (
     <>
-      <KpiRow frame={frame}/>
+      <KpiRow state={state}/>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 mb-5">
+        <SimulationPanel scenario={scenario} frame={state.frame} activeMitigations={activeMitigations} setActiveMitigations={setActiveMitigations} sim={sim}/>
+        <div className="min-w-0"><TwinCanvas state={state} hovered={hovered} setHovered={setHovered} compact/></div>
+      </div>
+      <LiveTerminal state={state}/>
+    </>
+  );
+}
+
+function ReportsRoom({ state, incidents, onExport, onJumpTo }: {
+  state: FrameState; incidents: Incident[]; onExport: (id: string) => void; onJumpTo: (inc: Incident) => void;
+}) {
+  return (
+    <>
+      <KpiRow state={state}/>
+      <div className="corners relative glass rounded-sm p-4 mb-5" data-testid="reports-list">
+        <div className="cbr"></div>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2"><FileText className="w-4 h-4 text-amber-300"/><h3 className="font-display text-[13px] tracking-wider text-white/90">SAVED INCIDENTS</h3></div>
+          <span className="chip">{incidents.length} bundles</span>
+        </div>
+        {incidents.length === 0 && (
+          <div className="py-8 text-center">
+            <FileText className="w-8 h-8 text-white/20 mx-auto mb-2"/>
+            <div className="text-[13px] text-white/50">No incidents saved yet.</div>
+            <div className="font-mono text-[10.5px] text-white/35 mt-1">Use the SAVE INCIDENT button in the top bar to capture the current frame as a shareable bundle.</div>
+          </div>
+        )}
+        {incidents.map((it) => (
+          <div key={it.id} className="grid grid-cols-[1fr_auto] gap-4 items-center py-2.5 border-b border-white/5 last:border-b-0" data-testid={`incident-${it.id}`}>
+            <div className="min-w-0">
+              <div className="text-[13px] text-white/90 truncate">{it.title}</div>
+              <div className="font-mono text-[10.5px] text-white/40 mt-0.5">
+                {it.id} · {it.scenario_name} · F{String(it.frame).padStart(2,'0')} · {new Date(it.created_at).toLocaleString()}
+              </div>
+              <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                <span className="chip"><ShieldAlert className="w-2.5 h-2.5 text-rose-300"/>Baseline {(it.snapshot.simulation.baseline_risk * 100).toFixed(0)}%</span>
+                <span className="chip"><ShieldCheck className="w-2.5 h-2.5 text-lime-300"/>Mitigated {(it.snapshot.simulation.new_risk * 100).toFixed(0)}%</span>
+                <span className="chip"><ScanEye className="w-2.5 h-2.5 text-cyan-300"/>{it.snapshot.mitre_active.length} techniques</span>
+                <span className="chip"><BrainCircuit className="w-2.5 h-2.5 text-lime-300"/>{it.snapshot.xai_active.length} signals</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button className="btn-tactical !py-1.5" onClick={() => onJumpTo(it)} data-testid={`incident-jump-${it.id}`}><span className="flex items-center gap-1.5"><Eye className="w-3.5 h-3.5"/>OPEN</span></button>
+              <button className="btn-tactical !py-1.5" onClick={() => onExport(it.id)} data-testid={`incident-export-${it.id}`}><span className="flex items-center gap-1.5"><Download className="w-3.5 h-3.5"/>EXPORT</span></button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function SettingsRoom({ state, scenario }: { state: FrameState; scenario: ScenarioFull }) {
+  return (
+    <>
+      <KpiRow state={state}/>
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
         <div className="corners relative glass rounded-sm p-4">
           <div className="cbr"></div>
@@ -1056,13 +945,16 @@ function SettingsRoom({ frame }: { frame: number }) {
         </div>
         <div className="corners relative glass rounded-sm p-4">
           <div className="cbr"></div>
-          <div className="flex items-center gap-2 mb-3"><BrainCircuit className="w-4 h-4 text-cyan-300"/><h3 className="font-display text-[13px] tracking-wider text-white/90">MODEL PREFERENCES</h3></div>
+          <div className="flex items-center gap-2 mb-3"><BrainCircuit className="w-4 h-4 text-cyan-300"/><h3 className="font-display text-[13px] tracking-wider text-white/90">MODEL & SCENARIO</h3></div>
           {[
+            { k: 'Model checkpoint',   v: 'tw-v3.4.1' },
+            { k: 'Feature schema',     v: 'phase03-v1-sealed · 80 features' },
             { k: 'Temporal window',    v: '5 frames EWMA' },
             { k: 'Threshold',          v: '0.45' },
-            { k: 'Feature schema',     v: 'phase03-v1-sealed' },
-            { k: 'Seed',               v: '42' },
-            { k: 'Explanation method', v: 'SHAP · 80 features' },
+            { k: 'Explanation method', v: 'SHAP contribution' },
+            { k: 'Scenario id',        v: scenario.id },
+            { k: 'Scenario seed',      v: '42' },
+            { k: 'Total frames',       v: String(state.frame_count) },
           ].map((r) => (
             <div key={r.k} className="flex items-center justify-between py-2 border-b border-white/5 last:border-b-0">
               <span className="text-[12.5px] text-white/70">{r.k}</span>
@@ -1076,39 +968,221 @@ function SettingsRoom({ frame }: { frame: number }) {
 }
 
 /* =========================================================================
+   TOAST
+   ========================================================================= */
+
+function Toast({ msg, tone }: { msg: string | null; tone: 'ok' | 'err' }) {
+  if (!msg) return null;
+  const color = tone === 'ok' ? '#B6FF3D' : '#FF2E63';
+  return (
+    <div className="fixed bottom-6 right-6 z-50 glass rounded-sm px-4 py-3 flex items-center gap-3 rise-in" data-testid="toast" style={{ borderColor: color, boxShadow: `0 0 24px -4px ${color}88` }}>
+      {tone === 'ok' ? <Check className="w-4 h-4" style={{ color }}/> : <AlertTriangle className="w-4 h-4" style={{ color }}/>}
+      <span className="text-[12.5px] text-white/90">{msg}</span>
+    </div>
+  );
+}
+
+/* =========================================================================
    APP
    ========================================================================= */
 
 function App() {
   const [nav, setNav] = useState<NavId>('overview');
   const [hovered, setHovered] = useState<string | null>(null);
+
+  // remote data
+  const [scenarios, setScenarios] = useState<ScenarioMeta[]>([]);
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [scenarioId, setScenarioId] = useState<string | null>(null);
+  const [tenantId, setTenantId] = useState<string | null>(null);
+  const [scenario, setScenario] = useState<ScenarioFull | null>(null);
+  const [frameState, setFrameState] = useState<FrameState | null>(null);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+
   const [frame, setFrame] = useState(12);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
+  const [activeMitigations, setActiveMitigations] = useState<Record<string, boolean>>({});
+  const [sim, setSim] = useState<SimResult | null>(null);
 
-  // auto-stop on last frame
-  useEffect(() => { if (frame >= FRAME_COUNT - 1 && playing) setPlaying(false); }, [frame, playing]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState<{ msg: string; tone: 'ok' | 'err' } | null>(null);
 
-  const conf = 90 + Math.min(6, frame * 0.3);
+  const flash = useCallback((msg: string, tone: 'ok' | 'err' = 'ok') => {
+    setToast({ msg, tone });
+    setTimeout(() => setToast(null), 3200);
+  }, []);
+
+  // boot
+  useEffect(() => {
+    (async () => {
+      try {
+        const [sc, tn] = await Promise.all([api.listScenarios(), api.listTenants()]);
+        setScenarios(sc); setTenants(tn);
+        if (sc.length > 0) setScenarioId(sc.find(s => s.id === 'sc-ransom-ω-7742')?.id || sc[0].id);
+        if (tn.length > 0) setTenantId(tn[0].id);
+      } catch (e) {
+        flash(`Failed to reach backend: ${(e as Error).message}`, 'err');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [flash]);
+
+  // load scenario detail
+  useEffect(() => {
+    if (!scenarioId) return;
+    (async () => {
+      try {
+        const full = await api.getScenario(scenarioId);
+        setScenario(full);
+        // reset mitigations for new scenario, default pick highest-impact
+        const top = [...full.mitigations].sort((a,b) => a.delta - b.delta)[0];
+        setActiveMitigations(top ? { [top.id]: true } : {});
+        setFrame(Math.min(12, full.frame_count - 1));
+      } catch (e) {
+        flash(`Failed to load scenario: ${(e as Error).message}`, 'err');
+      }
+    })();
+  }, [scenarioId, flash]);
+
+  // fetch frame state
+  useEffect(() => {
+    if (!scenarioId) return;
+    let alive = true;
+    (async () => {
+      try {
+        const st = await api.getFrame(scenarioId, frame);
+        if (alive) setFrameState(st);
+      } catch (e) {
+        if (alive) flash(`Frame fetch failed: ${(e as Error).message}`, 'err');
+      }
+    })();
+    return () => { alive = false; };
+  }, [scenarioId, frame, flash]);
+
+  // simulation recompute on toggles / frame / scenario change
+  useEffect(() => {
+    if (!scenarioId) return;
+    const active = Object.keys(activeMitigations).filter(k => activeMitigations[k]);
+    let alive = true;
+    (async () => {
+      try {
+        const r = await api.simulate(scenarioId, frame, active);
+        if (alive) setSim(r);
+      } catch (_) { /* silent */ }
+    })();
+    return () => { alive = false; };
+  }, [scenarioId, frame, activeMitigations]);
+
+  // incidents refresh
+  const refreshIncidents = useCallback(async () => {
+    if (!tenantId) return;
+    try {
+      const list = await api.listIncidents(tenantId);
+      setIncidents(list);
+    } catch (_) { /* silent */ }
+  }, [tenantId]);
+  useEffect(() => { refreshIncidents(); }, [refreshIncidents]);
+
+  // auto-stop scrubber
+  useEffect(() => {
+    if (!frameState) return;
+    if (frame >= frameState.frame_count - 1 && playing) setPlaying(false);
+  }, [frame, playing, frameState]);
+
+  const saveIncident = useCallback(async () => {
+    if (!scenario || !frameState) return;
+    setSaving(true);
+    try {
+      const tenant = tenants.find(t => t.id === tenantId);
+      const activeIds = Object.keys(activeMitigations).filter(k => activeMitigations[k]);
+      const inc = await api.createIncident({
+        scenario_id: scenario.id,
+        tenant_id: tenantId,
+        frame: frameState.frame,
+        title: `${scenario.name} — F${String(frameState.frame).padStart(2, '0')} snapshot`,
+        operator: tenant?.operator,
+        notes: `Auto-captured at ${new Date().toISOString()}`,
+        mitigation_ids: activeIds,
+      });
+      flash(`Incident ${inc.id} saved`);
+      await refreshIncidents();
+      setNav('reports');
+    } catch (e) {
+      flash(`Save failed: ${(e as Error).message}`, 'err');
+    } finally {
+      setSaving(false);
+    }
+  }, [scenario, frameState, tenantId, tenants, activeMitigations, flash, refreshIncidents]);
+
+  const exportIncident = useCallback((id: string) => {
+    const inc = incidents.find(i => i.id === id);
+    if (!inc) return;
+    const blob = new Blob([JSON.stringify(inc, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `${inc.id}.json`; a.click();
+    URL.revokeObjectURL(url);
+    flash(`Exported ${inc.id}.json`);
+  }, [incidents, flash]);
+
+  const jumpToIncident = useCallback((inc: Incident) => {
+    if (inc.scenario_id !== scenarioId) setScenarioId(inc.scenario_id);
+    setFrame(inc.frame);
+    setActiveMitigations(Object.fromEntries(inc.mitigation_ids.map(id => [id, true])));
+    setNav('overview');
+    flash(`Loaded ${inc.id}`);
+  }, [scenarioId, flash]);
+
+  if (loading) {
+    return (
+      <div className="grain bg-radial min-h-screen text-white flex items-center justify-center" data-testid="boot-loader">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 text-cyan-300 animate-spin mx-auto"/>
+          <div className="mt-3 font-mono text-[11px] tracking-[0.24em] text-cyan-300/70 uppercase">Booting Predictive Command Centre…</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!scenario || !frameState) {
+    return (
+      <div className="grain bg-radial min-h-screen text-white flex items-center justify-center">
+        <div className="text-center">
+          <AlertTriangle className="w-8 h-8 text-rose-300 mx-auto"/>
+          <div className="mt-3 font-mono text-[12px] text-rose-300">No scenario loaded — check backend /api/health</div>
+        </div>
+      </div>
+    );
+  }
+
+  const currentTenant = tenants.find(t => t.id === tenantId);
 
   return (
     <div className="grain bg-radial min-h-screen text-white">
-      <TopBar conf={conf}/>
+      <TopBar
+        conf={frameState.kpis.forecast_confidence}
+        scenarios={scenarios} scenarioId={scenarioId} onScenario={setScenarioId}
+        tenants={tenants} tenantId={tenantId} onTenant={setTenantId}
+        onSave={saveIncident} saving={saving}
+      />
       <div className="flex">
-        <NavRail current={nav} setCurrent={setNav}/>
+        <NavRail current={nav} setCurrent={setNav} tenant={currentTenant} operator={currentTenant?.operator}/>
         <main className="flex-1 min-w-0 p-4 lg:p-6 xl:p-8">
-          <SectionHead nav={nav} setNav={setNav} frame={frame}/>
-          <ReplayScrubber frame={frame} setFrame={setFrame} playing={playing} setPlaying={setPlaying} speed={speed} setSpeed={setSpeed}/>
+          <SectionHead nav={nav} setNav={setNav} frame={frame} scenarioName={scenario.name}/>
+          <ReplayScrubber frame={frame} setFrame={setFrame} playing={playing} setPlaying={setPlaying} speed={speed} setSpeed={setSpeed} frameCount={frameState.frame_count}/>
 
           <div key={nav} className="rise-in">
-            {nav === 'overview' && <OverviewRoom frame={frame} hovered={hovered} setHovered={setHovered}/>}
-            {nav === 'twin'     && <TwinRoom     frame={frame} hovered={hovered} setHovered={setHovered}/>}
-            {nav === 'forecast' && <ForecastRoom frame={frame}/>}
-            {nav === 'xai'      && <XaiRoom      frame={frame}/>}
-            {nav === 'mitre'    && <MitreRoom    frame={frame}/>}
-            {nav === 'simulate' && <SimulateRoom frame={frame} hovered={hovered} setHovered={setHovered}/>}
-            {nav === 'reports'  && <ReportsRoom  frame={frame}/>}
-            {nav === 'settings' && <SettingsRoom frame={frame}/>}
+            {nav === 'overview' && <OverviewRoom state={frameState} scenario={scenario} hovered={hovered} setHovered={setHovered} activeMitigations={activeMitigations} setActiveMitigations={setActiveMitigations} sim={sim}/>}
+            {nav === 'twin'     && <TwinRoom     state={frameState} hovered={hovered} setHovered={setHovered}/>}
+            {nav === 'forecast' && <ForecastRoom state={frameState}/>}
+            {nav === 'xai'      && <XaiRoom      state={frameState}/>}
+            {nav === 'mitre'    && <MitreRoom    state={frameState}/>}
+            {nav === 'simulate' && <SimulateRoom state={frameState} scenario={scenario} hovered={hovered} setHovered={setHovered} activeMitigations={activeMitigations} setActiveMitigations={setActiveMitigations} sim={sim}/>}
+            {nav === 'reports'  && <ReportsRoom  state={frameState} incidents={incidents} onExport={exportIncident} onJumpTo={jumpToIncident}/>}
+            {nav === 'settings' && <SettingsRoom state={frameState} scenario={scenario}/>}
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3 pt-4 mt-8 border-t border-white/5 text-[11px] text-white/40 font-mono" data-testid="footer-strip">
@@ -1119,10 +1193,12 @@ function App() {
               <span className="flex items-center gap-1.5"><CircleDot className="w-2 h-2 text-amber-300"/>Simulate</span>
               <span className="flex items-center gap-1.5"><CircleDot className="w-2 h-2 text-cyan-300"/>Defend</span>
             </div>
-            <div>Preview build · demo scenario CIC-IDS2017-α · Seed 42</div>
+            <div>API: /api · scenario {scenario.id} · seed 42</div>
           </div>
         </main>
       </div>
+
+      <Toast msg={toast?.msg || null} tone={toast?.tone || 'ok'}/>
     </div>
   );
 }
