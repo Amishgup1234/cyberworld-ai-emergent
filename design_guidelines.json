@@ -1,0 +1,150 @@
+{
+  "project_name": "CyberWorld AI - Predictive Cybersecurity Platform",
+  "archetype": "THE PERFORMANCE PRO / ELECTRIC & NEON (Tactical Cyber Command Center)",
+  "context_type": "DASHBOARD & INTERACTIVE PRODUCT DEMO",
+  "theme": "Dark Cyber/Tactical",
+  "colors": {
+    "background": {
+      "main": "#070A11",
+      "surface": "#0E131F",
+      "surface_elevated": "#141C2E",
+      "glass": "rgba(14, 19, 31, 0.75)",
+      "terminal": "#0A0D14"
+    },
+    "border": {
+      "subtle": "rgba(0, 240, 255, 0.12)",
+      "active": "rgba(0, 240, 255, 0.35)",
+      "warning": "rgba(255, 170, 0, 0.35)",
+      "critical": "rgba(255, 0, 85, 0.45)",
+      "safe": "rgba(57, 255, 20, 0.3)"
+    },
+    "accents": {
+      "cyan_primary": "#00F0FF",
+      "lime_secondary": "#39FF14",
+      "amber_warning": "#FFAA00",
+      "rose_critical": "#FF0055",
+      "indigo_subdued": "#6E7CFB"
+    },
+    "text": {
+      "primary": "#F0F6FC",
+      "secondary": "#8B949E",
+      "muted": "#484F58",
+      "highlight_cyan": "#00F0FF",
+      "highlight_lime": "#39FF14"
+    }
+  },
+  "typography": {
+    "headings": {
+      "font_family": "Outfit, Cabinet Grotesk, sans-serif",
+      "weights": "font-semibold (600), font-bold (700)",
+      "hero_scale": "text-3xl sm:text-4xl lg:text-5xl tracking-tight",
+      "section_scale": "text-xl sm:text-2xl tracking-tight"
+    },
+    "body": {
+      "font_family": "Inter, DM Sans, sans-serif",
+      "scale": "text-sm sm:text-base leading-relaxed"
+    },
+    "code_terminal": {
+      "font_family": "JetBrains Mono, Roboto Mono, monospace",
+      "scale": "text-xs sm:text-sm tracking-wider"
+    }
+  },
+  "spacing_and_layout": {
+    "container_padding": "p-4 sm:p-6 lg:p-8",
+    "grid_gap": "gap-4 lg:gap-6",
+    "border_radius": "rounded-lg sm:rounded-xl",
+    "layout_structure": {
+      "top_bar": "h-14 border-b border-border/40 backdrop-blur-xl bg-[#070A11]/80 px-4 flex items-center justify-between z-50 fixed top-0 left-0 right-0",
+      "navigation_rail": "w-16 lg:w-64 border-r border-border/40 bg-[#0E131F]/90 fixed top-14 bottom-0 left-0 z-40 flex flex-col justify-between p-3",
+      "main_canvas": "pt-16 pl-16 lg:pl-64 min-h-screen bg-[#070A11] grid grid-cols-1 xl:grid-cols-12 gap-4 p-4 lg:p-6"
+    }
+  },
+  "key_features_and_components": {
+    "command_top_bar": {
+      "elements": [
+        "Brand Logo & CyberWorld AI Tagline: 'Predict, Explain, Simulate, Defend'",
+        "Live Threat Score Indicator & Active Attack Vectors Count",
+        "Prediction Confidence Badge (94.8% AI accuracy)",
+        "Live System UTC Clock & Network Twin Status (SYNCED / 12,480 Nodes)",
+        "PDF Roadmap & Deck Highlights Modal Trigger button"
+      ]
+    },
+    "digital_twin_hero_canvas": {
+      "type": "Interactive Force-Directed / Topological Canvas & Graph",
+      "description": "Centerpiece visualization of the Enterprise Network Twin with interactive hosts (Crown Jewels, Gateway, Active Directory, Cloud Buckets, Workstations). Animated packet streams, risk heat halo, drag-and-zoom controls, node filter tabs (All, Critical, Targeted, Isolated), host detail inspect drawer.",
+      "interactions": "Hover to highlight attack path, click host to inspect telemetry & trigger what-if simulation."
+    },
+    "attack_forecast_panel": {
+      "type": "Right Rail / Tabbed Intelligence Stream",
+      "elements": [
+        "Attack Stage Probability Curve (Reconnaissance -> Initial Access -> Lateral Movement -> Exfiltration)",
+        "Predicted Next Target Hosts with estimated Lead Time (e.g. 14 mins remaining)",
+        "Severity gauge & AI confidence breakdown"
+      ]
+    },
+    "mitre_attack_matrix": {
+      "type": "Interactive Tactic & Technique Grid",
+      "elements": [
+        "Tactics: Recon, Initial Access, Execution, Persistence, Privilege Escalation, Defense Evasion, Credential Access, Lateral Movement",
+        "Heatmap chips showing observed vs predicted technique exploits with confidence scores"
+      ]
+    },
+    "xai_explainability_panel": {
+      "type": "Feature Contribution & Evidence Inspector",
+      "elements": [
+        "XAI Evidence Signals (Unusual SMB traffic volume + Kerberoasting anomaly)",
+        "Feature importance bar chart (SHAP value style attribution)",
+        "AI Reasoning narrative breakdown with 'Copy Evidence for SOC Incident' button"
+      ]
+    },
+    "what_if_defense_simulation": {
+      "type": "Interactive Mitigation Sandbox",
+      "elements": [
+        "Mitigation Toggles: 'Isolate Host AD-01', 'Block Port 445', 'Enforce MFA on VPN', 'Apply Patch CVE-2026-1189'",
+        "Live Simulation Re-run button with Threat Probability Reduction Delta (-82% Risk Score drop)",
+        "Action deployment trigger with audit log entry"
+      ]
+    },
+    "live_event_terminal": {
+      "type": "Sci-Fi Cyber Log Stream",
+      "elements": [
+        "Filtered feed (All, Anomaly, Attack Vector, Simulation Logs)",
+        "Monospace log lines with status colored badges and quick actions"
+      ]
+    },
+    "pdf_content_modal": {
+      "type": "Strategic Pitch Deck & Roadmap Showcase",
+      "elements": [
+        "Core Taglines: 'Predictive Intelligence Layer for Modern Security Operations'",
+        "Target User Segments: SOC Analysts, CISO/Risk Officers, Red/Blue Teams, MSSP Providers",
+        "Phased Roadmap: Phase 1 Twin Graph -> Phase 2 Predictive XAI Engine -> Phase 3 Autonomous Remediation Playbooks"
+      ]
+    }
+  },
+  "image_urls": {
+    "server_rack_hero": "https://images.unsplash.com/photo-1695668548342-c0c1ad479aee?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTJ8MHwxfHNlYXJjaHwzfHxjeWJlcnNlY3VyaXR5JTIwbmV0d29yayUyMGRhcmslMjB0ZWNoJTIwc2VydmVyfGVufDB8fHx8MTc4OTEzNzgxNnww&ixlib=rb-4.1.0&q=85",
+    "network_cables_tech": "https://images.unsplash.com/photo-1683322499436-f4383dd59f5a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTJ8MHwxfHNlYXJjaHwyfHxjeWJlcnNlY3VyaXR5JTIwbmV0d29yayUyMGRhcmslMjB0ZWNoJTIwc2VydmVyfGVufDB8fHx8MTc4OTEzNzgxNnww&ixlib=rb-4.1.0&q=85",
+    "datacenter_array": "https://images.unsplash.com/photo-1639066648921-82d4500abf1a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTJ8MHwxfHNlYXJjaHw0fHxjeWJlcnNlY3VyaXR5JTIwbmV0d29yayUyMGRhcmslMjB0ZWNoJTIwc2VydmVyfGVufDB8fHx8MTc4OTEzNzgxNnww&ixlib=rb-4.1.0&q=85",
+    "cable_network": "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTJ8MHwxfHNlYXJjaHwxfHxjeWJlcnNlY3VyaXR5JTIwbmV0d29yayUyMGRhcmslMjB0ZWNoJTIwc2VydmVyfGVufDB8fHx8MTc4OTEzNzgxNnww&ixlib=rb-4.1.0&q=85"
+  },
+  "instructions_to_main_agent": [
+    "Build a single-page or rich multi-tab React app in JS/JSX with Lucide React icons, Recharts/Chart.js/Canvas for charts and network visualization, and Framer Motion for smooth cyber UI transitions.",
+    "Implement the dark cyber tactical aesthetic with deep background (#070A11), cyan/lime glowing highlights, glass cards (backdrop-blur-xl border border-cyan-500/20), and monospace indicators.",
+    "Ensure all interactive components (buttons, tabs, inputs, node clicks, simulation toggles) have explicit `data-testid` attributes (e.g. data-testid='twin-node-ad-01', data-testid='sim-toggle-isolate-host').",
+    "Include sample data for 12+ network nodes across 4 tiers (Perimeter, Core AD, Cloud Storage, Workstations), 5 active threat predictions, 8 MITRE techniques, and real-time interactive What-If simulation diffs.",
+    "Add a top command bar with live clock, global risk meter, twin sync pulse, and a Pitch Deck / Strategy drawer showcasing content directly from the CyberWorld AI PDF."
+  ],
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "You tend to converge toward generic, 'on distribution' outputs. In frontend design, this creates what users call the 'AI slop' aesthetic. Avoid this: make creative, distinctive frontends that surprise and delight.",
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients.",
+    "Don't make generic centered layouts, simplistic gradients, and uniform styling.",
+    "Create depth through layered design elements with z-index hierarchy.",
+    "Use glass-morphism effects with backdrop filters (12-24px blur).",
+    "You MUST NOT apply universal transition (e.g. transition: all). This breaks transforms. Always specify properties.",
+    "You MUST NOT center align the app container (.App { text-align: center; }).",
+    "Always use modern button styles like pill-shaped, or sharp tactical button with interaction animations & color relevant to the app style.",
+    "NEVER use AI assistant Emoji characters (like 🤖🧠💭💡🔮🎯) for icons. Use Lucide or Phosphor React icons instead.",
+    "Every interaction needs micro-animations - hover states, transitions, pulsing glowing indicators.",
+    "All interactive and key informational elements MUST include a `data-testid` attribute."
+  ]
+}
